@@ -12,3 +12,9 @@
   adapters (`config.js`, `state.js`) covering the `OMLX_ROUTER_*` env vars,
   the config schema with `{env:}` placeholder handling, and the
   `~/.local/state/omlx-router/` state paths.
+- The cache-aware economics model: `contextDebt` (per-turn carrying cost of
+  the accumulated context and the projected cost of the next N turns) and
+  `compactionRoi` (per-turn savings, the one-time cache-invalidation premium,
+  break-even turns, `worthIt`) — validated against a recorded turn whose cost
+  reconciles exactly to $0.028712 and a recorded compaction-checkpoint
+  session.

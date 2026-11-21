@@ -7,8 +7,12 @@ and `@231self/opencode-compaction`. Plain ESM, no npm dependencies.
 - `cost.js` — normalises every cost shape seen in the wild (OpenCode V2
   catalog, models.dev, V2 client) into per-million-token tier prices
   (`normaliseCost`, `tiersOf`, `mergeCost`, `costSource`) and models a turn's
-  cost with a measured cache-hit share (`modelledTurnCost`). Missing prices
-  stay `undefined` so displays say "unknown" instead of inventing `$0`.
+  cost with a measured cache-hit share (`modelledTurnCost`). The economics
+  model adds `contextDebt` (the per-turn carrying cost of the accumulated
+  context and the projected cost of the next N turns) and `compactionRoi`
+  (per-turn savings, the one-time cache-invalidation premium, break-even
+  turns). Missing prices stay `undefined` so displays say "unknown" instead
+  of inventing `$0`.
 - `tokens.js` — token estimation (`estimateTokens`, `partTokens`,
   `countContextTokens`), V2 active-context measurement
   (`measureSessionContext`, including `type: "compaction"` checkpoints), and

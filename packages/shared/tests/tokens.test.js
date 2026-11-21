@@ -2,13 +2,7 @@ import { expect, test } from "bun:test"
 
 import { cacheHitShare } from "../src/tokens.js"
 
-// A real recorded turn (deepseek/deepseek-v4-pro) with its host-reported cost.
-// Provider usage reports cached tokens apart from `input`, which covers only
-// cache misses: misses × input price + hits × cache-read price + (output +
-// reasoning) × output price reproduces the recorded cost exactly, so the
-// cache-hit share divides hits by the full prefill.
-const TURN = { input: 39357, output: 423, reasoning: 460, cache: { read: 44928, write: 0 } }
-const PRICES = { input: 0.66, output: 1.98, cacheRead: 0.022 }
+import { RECORDED_PRICES as PRICES, RECORDED_TURN as TURN } from "./fixtures.js"
 
 test("the cache-hit share divides hits by the full prefill", () => {
   expect(cacheHitShare(TURN)).toBeCloseTo(44928 / (39357 + 44928), 6)

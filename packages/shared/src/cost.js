@@ -8,6 +8,7 @@
  * Missing prices stay `undefined` so a display can say "unknown" instead of
  * inventing `$0`, and a real zero still reads as free.
  */
+import { cacheHitShare } from "./tokens.js"
 
 function price(value) {
   if (value == null || value === "") return undefined
@@ -217,4 +218,108 @@ export function modelledTurnCost({
     (cached / 1_000_000) * (tier?.cache?.read ?? 0) +
     (outputTokens / 1_000_000) * (tier?.output ?? 0)
   )
+}
+
+function count(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? number : 0
+}
+
+/**
+ * Projected cost of carrying the current context forward.
+ *
+ * `contextTokens` is the projected per-turn prefill and `prefixTokens` its
+ * stable, cacheable part. Each future turn re-pays that prefix — mostly
+ * `cache.read`, plus input price on the drift share (the part of the prefix
+ * the cache no longer serves). `perTurnDelta` is that per-turn carrying cost
+ * of the accumulated context alone; `projectedCost` is the full cost of the
+ * next `projectedTurns` turns at the current context ("keeping this context
+ * costs $X over the next N turns"). Missing prices read as 0.
+ */
+export function contextDebt({
+  price: tier,
+  contextTokens,
+  prefixTokens = 0,
+  cacheHitRatio = 0,
+  outputTokens = 0,
+  projectedTurns = 0,
+}) {
+  const context = count(contextTokens)
+  const prefix = Math.min(context, count(prefixTokens))
+  const ratio = Math.min(1, Math.max(0, Number(cacheHitRatio) || 0))
+  const cached = prefix * ratio
+  const misses = prefix - cached
+  const perTurnDelta =
+    (cached / 1_000_000) * (tier?.cache?.read ?? 0) + (misses / 1_000_000) * (tier?.input ?? 0)
+  const perTurn = modelledTurnCost({
+    price: tier,
+    inputTokens: context,
+    prefixTokens: prefix,
+    cacheHitRatio: ratio,
+    outputTokens: count(outputTokens),
+  })
+  return { perTurnDelta, projectedCost: perTurn * count(projectedTurns) }
+}
+
+/**
+ * When does compaction pay for itself under cache-billed pricing?
+ *
+ * `contextTokens` / `compactedTokens` are the projected next-turn prefill
+ * before and after compaction; `cacheHitRatio` is the measured share of the
+ * prefix the cache serves (falling back to `cacheState` — the last turn's
+ * recorded usage in `{ input, cache: { read, write } }` shape — when not
+ * given).
+ *
+ * - `perTurnSavings` = modelled turn cost at `contextTokens` minus the same
+ *   turn at `compactedTokens`: compaction removes the prefix re-payment.
+ * - `invalidationCost` = the one-time cache-invalidation premium: the first
+ *   post-compaction turn writes the whole compacted prefill at `cache.write`
+ *   (falling back to the input price where writes are not billed separately),
+ *   against what a steady compacted turn costs once cached.
+ * - `breakEvenTurns` = `ceil(invalidationCost / perTurnSavings)` — 0 when
+ *   savings are immediate, `Infinity` when compaction never pays.
+ * - `worthIt` = `breakEvenTurns <= expectedTurns`.
+ *
+ * Missing prices read as 0; counts are clamped to finite, non-negative values.
+ */
+export function compactionRoi({
+  price: tier,
+  contextTokens,
+  compactedTokens,
+  cacheState,
+  cacheHitRatio,
+  outputTokens = 0,
+  expectedTurns = 0,
+}) {
+  const context = count(contextTokens)
+  const compacted = count(compactedTokens)
+  const derived = cacheHitRatio == null && cacheState ? cacheHitShare(cacheState) : 0
+  const ratio = Math.min(1, Math.max(0, Number(cacheHitRatio ?? derived) || 0))
+  const output = count(outputTokens)
+  const keep = modelledTurnCost({
+    price: tier,
+    inputTokens: context,
+    prefixTokens: context,
+    cacheHitRatio: ratio,
+    outputTokens: output,
+  })
+  const steady = modelledTurnCost({
+    price: tier,
+    inputTokens: compacted,
+    prefixTokens: compacted,
+    cacheHitRatio: ratio,
+    outputTokens: output,
+  })
+  const perTurnSavings = keep - steady
+  const writePrice = tier?.cache?.write ?? tier?.input ?? 0
+  const firstTurn =
+    (compacted / 1_000_000) * writePrice + (output / 1_000_000) * (tier?.output ?? 0)
+  const invalidationCost = firstTurn - steady
+  const breakEvenTurns =
+    perTurnSavings > 0
+      ? Math.ceil(Math.max(0, invalidationCost) / perTurnSavings)
+      : invalidationCost <= 0
+        ? 0
+        : Infinity
+  return { perTurnSavings, invalidationCost, breakEvenTurns, worthIt: breakEvenTurns <= count(expectedTurns) }
 }

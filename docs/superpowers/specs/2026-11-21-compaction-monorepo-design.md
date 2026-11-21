@@ -133,9 +133,12 @@ contextDebt({ price, contextTokens, prefixTokens, cacheHitRatio, outputTokens,
 ```
 
 The projected cost of the next `projectedTurns` turns at the current, still
-growing context: each turn re-pays the prefix (mostly `cache.read`, plus
-`cache.write` on drift and full re-writes after switches). Returned so a
-display can say "keeping this context costs $X over the next N turns".
+growing context: each turn re-pays the prefix (mostly `cache.read`, plus the
+input price on the drift share). `perTurnDelta` is that prefix carrying cost
+per turn (`prefix × ratio × cache.read + prefix × (1 − ratio) × input`, per
+million tokens); `projectedCost` is `projectedTurns ×` the full modelled turn
+cost at `contextTokens`. Returned so a display can say "keeping this context
+costs $X over the next N turns".
 
 ### 4.2 compactionRoi
 
@@ -147,13 +150,15 @@ compactionRoi({ price, contextTokens, compactedTokens, cacheState,
 
 - `perTurnSavings` = modelled turn cost at `contextTokens` minus the modelled
   turn cost at `compactedTokens`, using the measured `cacheHitRatio` (from
-  `cacheHitShare` of the last turn; the pin fallback stays 0.8 and 0 disables).
-- `invalidationCost` = the one-time delta of losing the cached prefix: the
-  post-compaction turn pays `cache.write` over the compacted prefix and input
-  price on fresh tokens, against what the same turn would have paid with the
-  cache intact.
-- `breakEvenTurns` = `ceil(invalidationCost / perTurnSavings)` (0 when savings
-  are immediate; `Infinity` when compaction never pays).
+  `cacheHitShare` of the last turn's recorded usage when not given; the pin
+  fallback stays 0.8 and 0 disables).
+- `invalidationCost` = the one-time cache-invalidation premium: the first
+  post-compaction turn writes the whole compacted prefill at `cache.write`
+  (falling back to the input price where writes are not billed separately)
+  plus the output cost, minus what a steady compacted turn costs once cached.
+- `breakEvenTurns` = `ceil(invalidationCost / perTurnSavings)` (0 when
+  savings are immediate or the premium is non-positive; `Infinity` when
+  compaction never pays).
 - `worthIt` = `breakEvenTurns <= expectedTurns`.
 
 Validation: replay recorded sessions (including `type: "compaction"`
