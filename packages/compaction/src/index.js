@@ -1,4 +1,5 @@
 import { readConfig } from "@231self/opencode-shared/config.js"
+import { JudgeClient } from "@231self/opencode-shared/judge-client.js"
 import { createKiloContext } from "@231self/opencode-shared/kilo.js"
 import { refOf } from "@231self/opencode-shared/refs.js"
 
@@ -38,9 +39,15 @@ export default {
       }
     }
 
-    await register("context", (event) =>
-      runContext({ host: "opencode", env: process.env, ctx, config: read(), core, event }),
-    )
+    // The judge refines "uncertain" compaction verdicts only; it is created
+    // once and reconfigured per turn so settings changes apply live.
+    const judge = new JudgeClient({ config: read().judge, env: process.env })
+
+    await register("context", (event) => {
+      const config = read()
+      judge.configure(config.judge)
+      return runContext({ host: "opencode", env: process.env, ctx, config, core, event, judge })
+    })
 
     if (read().debug) {
       console.log("[omlx-compaction] loaded", {

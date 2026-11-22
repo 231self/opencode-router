@@ -15,7 +15,8 @@
     "url": "https://github.com/231self/opencode-router/issues"
   },
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./tui": "./src/tui.js"
   },
   "files": [
     "src",

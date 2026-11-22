@@ -55,6 +55,13 @@ export const DEFAULT_CONFIG = {
     keepRecentToolOutputs: 3,
     keepRecentTurns: 2,
   },
+  compaction: {
+    enabled: true,
+    expectedTurns: 8,
+    baseCooldown: 3,
+    judgeRefine: true,
+    summaryTokens: 1200,
+  },
   limits: {
     shortfallTolerance: 0.2,
     allowLocalForComplexity: 2,
