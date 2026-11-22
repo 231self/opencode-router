@@ -38,19 +38,24 @@
   the step.
 - A delayed advisory re-reads the pin before writing, abandons the write if the
   pin was deleted, and preserves a newer same-model variant, force flag,
-  request marker, or advisory.
+  redirect, request marker, or advisory. Overflow compares redirects
+  structurally and writes the cleared state in one update.
 - Calibration updates take a cross-process lock that fails fast instead of
-  stealing another writer's lock, and checkpoint deduplication lives inside
-  the locked update and in the calibration artifact rather than the routing
-  pin.
+  stealing another writer's lock. A failed commit does not advance the pin's
+  checkpoint, arm rebuild capture, or consume a rebuild sample.
+- Checkpoint deduplication lives inside the locked update and in the
+  calibration artifact rather than the routing pin, and observation writes
+  preserve that metadata.
 - The prediction compared at the next compaction is the one stored by the last
-  advisory before it, not one reconstructed from the post-compaction tail.
+  advisory for the same model; opaque or empty checkpoints are counted but
+  not used to learn a size or an error.
 - Prices are resolved per token count (`tierAt`), including strict `gt`
-  thresholds and partial overrides, and measured samples are priced at their
-  own observed size rather than today's forecast size. An explicit zero
-  cache-write price is no longer replaced by the input price.
-- Cache samples ignore zero-prefill steps and mixed-model turn-log seeds, and
-  the configured window is bounded by the live ring.
+  thresholds and partial overrides. Measured summary and rebuild samples are
+  priced at each observation's own prefill and averaged as dollars, not at the
+  mean prefill. An explicit zero cache-write price is no longer replaced.
+- Cache samples ignore zero-prefill steps and mixed-model turn-log seeds before
+  choosing between live and persisted data, and the window is bounded by the
+  live ring.
 - The economics veto runs after the guard, so a held `compact-now` cannot
   survive an unprofitable estimate. Horizons use net payback for `worth it`.
 - The usage stream's debug path logs a fixed message instead of stringifying

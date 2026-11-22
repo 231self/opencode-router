@@ -165,12 +165,22 @@ export class UsageTracker {
     state.pending = { checkpoint, at: Number(at) || this.now() }
   }
 
+  /** The first post-compaction step, without consuming it. */
+  peekRebuild(sessionID) {
+    if (!sessionID) return null
+    return this.state(sessionID).rebuild ?? null
+  }
+
+  /** Consume the rebuild sample after a successful calibration commit. */
+  clearRebuild(sessionID) {
+    if (!sessionID) return
+    this.state(sessionID).rebuild = null
+  }
+
   /** The first post-compaction step, consumed once. */
   takeRebuild(sessionID) {
-    if (!sessionID) return null
-    const state = this.state(sessionID)
-    const rebuild = state.rebuild ?? null
-    state.rebuild = null
+    const rebuild = this.peekRebuild(sessionID)
+    this.clearRebuild(sessionID)
     return rebuild
   }
 
@@ -187,9 +197,15 @@ export class UsageTracker {
    */
   samplesFor({ sessionID, model } = {}) {
     if (!sessionID) return { steps: [], source: "fallback" }
-    const memory = this.state(sessionID).steps.filter(
-      (step) => step.model && (!model || sameModel(step.model, model)),
-    )
+    const usable = (step) =>
+      step &&
+      (Number(step.tokens?.input) || 0) +
+        (Number(step.tokens?.read) || 0) +
+        (Number(step.tokens?.write) || 0) >
+        0
+    const memory = this.state(sessionID).steps
+      .filter((step) => step.model && (!model || sameModel(step.model, model)))
+      .filter(usable)
     if (memory.length > 0) return { steps: memory, source: "measured" }
 
     const target = model ? `${model.providerID}/${model.id}` : null
@@ -203,6 +219,7 @@ export class UsageTracker {
           model: model ? refOf(model) : null,
           tokens: tokensOf(turn.tokens),
         }))
+        .filter(usable)
       return { steps: persisted, source: persisted.length > 0 ? "turn-log" : "fallback" }
     } catch {
       return { steps: [], source: "fallback" }

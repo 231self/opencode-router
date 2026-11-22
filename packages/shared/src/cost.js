@@ -29,7 +29,9 @@ function tierDefinition(entry) {
   const tier = entry?.tier
   if (tier && typeof tier === "object") {
     const size = Number(tier.size)
-    return Number.isFinite(size) && size > 0 ? { type: tier.type ?? "context", size } : null
+    return Number.isFinite(size) && size > 0
+      ? { type: tier.type ?? "context", size, ...(tier.gt ? { gt: true } : {}) }
+      : null
   }
   // V2 client overrides use `when: { context: { gt: size } }`.
   const threshold = Number(entry?.when?.context?.gt)
@@ -282,9 +284,11 @@ export function contextDebt({
  *   a compaction cost.
  * - `breakEvenTurns` = `ceil(invalidationCost / perTurnSavings)` — 0 when
  *   savings are immediate, `Infinity` when compaction never pays.
- * - `worthIt` = `breakEvenTurns <= expectedTurns`.
+ * - `worthIt` = positive savings and positive net payback at `expectedTurns`.
  *
- * Missing prices read as 0; counts are clamped to finite, non-negative values.
+ * `keepCost`, `steadyCost`, and `firstTurnCost` are optional input-only
+ * overrides; when supplied they replace the modelled tier prices. Missing
+ * prices read as 0; counts are clamped to finite, non-negative values.
  */
 /** The tier that applies at `tokens`: the largest matching size, else base. */
 export function tierAt(tiers, tokens) {

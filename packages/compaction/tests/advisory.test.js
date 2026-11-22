@@ -124,6 +124,14 @@ test("an unprofitable compaction is not worth it at any shown horizon", () => {
   expect(projectHorizons(null)).toEqual([])
 })
 
+test("negative savings never make a horizon worth it, even with a credit", () => {
+  const projections = projectHorizons(
+    { perTurnSavings: -1, invalidationCost: -2, breakEvenTurns: 0 },
+    [1, 8],
+  )
+  expect(projections.every((entry) => !entry.worthIt)).toBe(true)
+})
+
 test("verdict instability measures self-contradiction", () => {
   expect(verdictInstability(["compact", "compact", "compact"])).toBe(0)
   expect(verdictInstability(["compact", "wait", "compact", "delegate"])).toBeCloseTo(0.5, 6)

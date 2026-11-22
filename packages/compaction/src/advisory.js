@@ -25,13 +25,12 @@ export function projectHorizons(roi, horizons = DEFAULT_HORIZONS) {
   if (!roi) return []
   const savings = Number(roi.perTurnSavings) || 0
   const premium = Number(roi.invalidationCost) || 0
-  const breakEven = Number(roi.breakEvenTurns)
   return normaliseHorizons(horizons).map((turns) => {
     const net = savings * turns - premium
     return {
       turns,
       net,
-      worthIt: net > 0 && Number.isFinite(breakEven) && breakEven <= turns,
+      worthIt: savings > 0 && net > 0,
     }
   })
 }

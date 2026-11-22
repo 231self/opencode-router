@@ -67,6 +67,16 @@ test("the V2 client cost shape becomes a tier with overrides", () => {
   })
 })
 
+test("a strict tier survives a normalisation round trip", () => {
+  const once = normaliseCost([
+    { input: 1, output: 2 },
+    { when: { context: { gt: 200_000 } }, input: 2 },
+  ])
+  const twice = normaliseCost(once)
+  expect(twice[1].tier.gt).toBe(true)
+  expect(twice[1].tier.size).toBe(200_000)
+})
+
 test("models.dev v1 wrapped prices are read", () => {
   expect(normaliseCost({ input: { price: 1.25 }, output: { price: 5 } })).toEqual([
     { input: 1.25, output: 5, cache: { read: undefined, write: undefined } },

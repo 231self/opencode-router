@@ -1,4 +1,4 @@
-import { clearPin, readPin, sessionHash, writePin } from "@231self/opencode-shared/state.js"
+import { readPin, sessionHash, writePin } from "@231self/opencode-shared/state.js"
 import { sameModel, refOf } from "@231self/opencode-shared/refs.js"
 import { countContextTokens, estimateTokens } from "@231self/opencode-shared/tokens.js"
 
@@ -113,21 +113,20 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       calibration?.sessions?.[hash]?.checkpoint ?? latest.compaction?.checkpoint ?? "",
     )
     const checkpoint = checkpointOf(event.messages)
-    const rebuild = checkpointID && usage ? usage.takeRebuild(sessionID) : null
+    const rebuild = checkpointID && usage ? usage.peekRebuild(sessionID) : null
     const usableRebuild = Boolean(rebuild?.tokens && rebuild.checkpoint === checkpointID)
     const alreadyCalibrated = Boolean(
       checkpoint?.id && calibration?.sessions?.[hash]?.checkpoint === checkpoint.id,
     )
-    let recordedCheckpoint = false
     if (
       config.compaction?.enabled !== false &&
       target &&
       (usableRebuild || (checkpoint?.id && !alreadyCalibrated))
     ) {
-      const actualContext = Math.max(0, tokens - systemTokens)
       const tail = tailTokens(event.messages)
+      let committed = null
       try {
-        calibration = updateCalibration(env, (doc) => {
+        committed = updateCalibration(env, (doc) => {
           let next = doc
           if (usableRebuild) {
             next = recordObservation(next, {
@@ -137,35 +136,38 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
             })
           }
           if (checkpoint?.id && doc.sessions?.[hash]?.checkpoint !== checkpoint.id) {
-            const prior = calibrationFor(doc, target)
-            const priorSummary = Number(prior?.summary?.value)
-            const predictedSummary =
-              Number.isFinite(priorSummary) && priorSummary > 0
-                ? priorSummary
-                : Math.max(0, Number(settings.summaryTokens) || 0)
-            // Prefer the prediction stored by the last advisory before the
-            // compaction; fall back to reconstructing it for old pins.
-            const savedPrediction = Number(
-              latest.compaction?.advisory?.estimates?.predictedTotal,
-            )
-            next = recordObservation(next, {
-              model: target,
-              kind: "prediction",
-              value: {
-                predicted:
-                  Number.isFinite(savedPrediction) && savedPrediction > 0
-                    ? savedPrediction
-                    : systemTokens + predictedSummary + tail,
-                actual: tokens,
-              },
-            })
             // Learn the textual summary's size, not whatever else survived.
             // Opaque/native checkpoints have no comparable summary text.
             const summaryText =
-              typeof checkpoint.summary === "string" && !checkpoint.native
+              typeof checkpoint.summary === "string" &&
+              Boolean(checkpoint.summary.trim()) &&
+              !checkpoint.native
                 ? estimateTokens(checkpoint.summary) + 16
                 : 0
             if (summaryText > 0) {
+              const prior = calibrationFor(doc, target)
+              const priorSummary = Number(prior?.summary?.value)
+              const predictedSummary =
+                Number.isFinite(priorSummary) && priorSummary > 0
+                  ? priorSummary
+                  : Math.max(0, Number(settings.summaryTokens) || 0)
+              // Prefer the prediction stored by the last advisory for this
+              // model; fall back to reconstructing it for old pins.
+              const targetKey = `${target.providerID}/${target.id}`
+              const saved = latest.compaction?.advisory?.estimates
+              const savedPrediction =
+                saved?.predictedModel === targetKey ? Number(saved?.predictedTotal) : NaN
+              next = recordObservation(next, {
+                model: target,
+                kind: "prediction",
+                value: {
+                  predicted:
+                    Number.isFinite(savedPrediction) && savedPrediction > 0
+                      ? savedPrediction
+                      : systemTokens + predictedSummary + tail,
+                  actual: tokens,
+                },
+              })
               next = recordObservation(next, { model: target, kind: "summary", value: summaryText })
             }
             next = recordObservation(next, { model: target, kind: "compaction" })
@@ -195,17 +197,19 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
                 [hash]: { checkpoint: checkpoint.id, at: Date.now() },
               },
             }
-            recordedCheckpoint = true
           }
           return next
         })
+        calibration = committed
       } catch {
-        // A failed calibration write must not block the advisory.
+        // A failed calibration write must not block the advisory, advance the
+        // pin mirror, or consume the rebuild sample.
       }
-      if (recordedCheckpoint) {
+      if (checkpoint?.id && committed?.sessions?.[hash]?.checkpoint === checkpoint.id) {
         checkpointID = checkpoint.id
         usage?.markPendingRebuild({ sessionID, checkpoint: checkpoint.id, at: Date.now() })
       }
+      if (committed && usableRebuild) usage?.clearRebuild(sessionID)
     }
 
     // The advisory (structure + compaction economics + optional judge) with
@@ -267,7 +271,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     const sameRouting =
       JSON.stringify(fresh.model ?? null) === JSON.stringify(latest.model ?? null) &&
       Boolean(fresh.forced) === Boolean(latest.forced) &&
-      String(fresh.redirect ?? "") === String(latest.redirect ?? "") &&
+      JSON.stringify(fresh.redirect ?? null) === JSON.stringify(latest.redirect ?? null) &&
       (Number(fresh.since) || 0) === (Number(latest.since) || 0)
     const compactionUnchanged =
       JSON.stringify(fresh.compaction ?? null) === JSON.stringify(latest.compaction ?? null)
@@ -283,7 +287,6 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     if (checkpointID) nextCompaction.checkpoint = checkpointID
 
     const clearStale = overflow && sameRouting && !fresh.compaction?.requestedAt
-    if (clearStale) clearPin(host, sessionID, env)
 
     const next = {
       ...fresh,

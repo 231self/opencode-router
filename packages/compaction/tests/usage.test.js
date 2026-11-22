@@ -196,6 +196,32 @@ test("the rebuild carries the model that actually ran the step", () => {
   expect(usage.takeRebuild("ses_1").model).toMatchObject(CLAUDE)
 })
 
+test("an output-only live step does not hide a valid persisted seed", () => {
+  const env = tempEnv()
+  appendTurn(
+    "opencode",
+    {
+      ts: NOW - 30_000,
+      host: "opencode",
+      session: sessionHash("ses_1"),
+      steps: 1,
+      usedModel: "anthropic/claude-opus-5-5",
+      tokens: { input: 10_000, output: 200, cache: { read: 30_000, write: 0 } },
+    },
+    env,
+  )
+  const usage = new UsageTracker({ env, now: () => NOW })
+  usage.noteStepStart({ sessionID: "ses_1", model: CLAUDE, at: NOW - 1_000 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 0, output: 500, cache: { read: 0, write: 0 } },
+    at: NOW - 500,
+  })
+  const result = usage.ratioFor({ sessionID: "ses_1", model: CLAUDE, window: 1, fallback: 0.4 })
+  expect(result.ratio).toBeCloseTo(0.75, 9)
+  expect(result.source).toBe("turn-log")
+})
+
 test("the window limits how far back the ratio looks", () => {
   const usage = new UsageTracker({ env: tempEnv(), now: () => NOW })
   const steps = [

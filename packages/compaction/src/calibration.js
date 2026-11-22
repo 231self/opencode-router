@@ -129,8 +129,10 @@ function foldBuckets(previous, value) {
   const mean = (key) =>
     (Number(prev[key]) || 0) +
     (buckets[key] - (Number(prev[key]) || 0)) / samples
+  const recent = [...(previous?.recent ?? []), buckets].slice(-5)
   return {
     value: { input: mean("input"), read: mean("read"), write: mean("write"), output: mean("output") },
+    recent,
     samples,
     at: Date.now(),
   }

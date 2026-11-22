@@ -72,33 +72,26 @@ export async function advise({
   const rebuildMeasured = Number(calibrated?.rebuild?.samples) > 0
   const keepTier = pricedTierAt(tiers, measuredTokens)
   const compactedTier = pricedTierAt(tiers, compactedTokens)
-  const requestPrefill = requestMeasured
-    ? (Number(calibrated.request.value.input) || 0) +
-      (Number(calibrated.request.value.read) || 0) +
-      (Number(calibrated.request.value.write) || 0)
-    : 0
-  const rebuildPrefill = rebuildMeasured
-    ? (Number(calibrated.rebuild.value.input) || 0) +
-      (Number(calibrated.rebuild.value.read) || 0) +
-      (Number(calibrated.rebuild.value.write) || 0)
-    : 0
-  const requestTier = requestPrefill > 0 ? pricedTierAt(tiers, requestPrefill) : null
-  const rebuildTier = rebuildPrefill > 0 ? pricedTierAt(tiers, rebuildPrefill) : null
-  let summaryCost = 0
+  const summaryCostMeasured = requestMeasured
+    ? meanBucketCost(tiers, calibrated.request)
+    : null
+  const rebuildCost = rebuildMeasured
+    ? meanBucketCost(tiers, calibrated.rebuild, { output: false })
+    : null
+  let summaryCost = summaryCostMeasured ?? 0
   let keepCost = null
   let steadyCost = null
   let firstTurnCost = null
   if (keepTier && compactedTier) {
-    summaryCost =
-      requestMeasured && requestTier
-        ? bucketCost(requestTier, calibrated.request.value)
-        : modelledTurnCost({
-            price: keepTier,
-            inputTokens: measuredTokens,
-            prefixTokens: measuredTokens,
-            cacheHitRatio: ratio,
-            outputTokens: summaryTokens,
-          })
+    if (summaryCostMeasured == null) {
+      summaryCost = modelledTurnCost({
+        price: keepTier,
+        inputTokens: measuredTokens,
+        prefixTokens: measuredTokens,
+        cacheHitRatio: ratio,
+        outputTokens: summaryTokens,
+      })
+    }
     keepCost = modelledTurnCost({
       price: keepTier,
       inputTokens: measuredTokens,
@@ -116,10 +109,6 @@ export async function advise({
     const writePrice = compactedTier.cache?.write ?? compactedTier.input ?? 0
     firstTurnCost = (compactedTokens / 1_000_000) * writePrice
   }
-  const rebuildCost =
-    compactedTier && rebuildMeasured && rebuildTier
-      ? bucketCost(rebuildTier, { ...calibrated.rebuild.value, output: 0 })
-      : null
   const roi =
     keepTier && compactedTier
       ? compactionRoi({
@@ -152,10 +141,11 @@ export async function advise({
       summaryTokens,
       summarySource: summaryMeasured ? "measured" : "assumed",
       predictedTotal: compactedTokens,
+      predictedModel: model ? `${model.providerID}/${model.id ?? model.modelID}` : null,
       summaryCost,
-      summaryCostSource: requestMeasured ? "measured" : "estimated",
+      summaryCostSource: summaryCostMeasured != null ? "measured" : "estimated",
       rebuildCost,
-      rebuildSource: rebuildMeasured ? "measured" : "modelled",
+      rebuildSource: rebuildCost != null ? "measured" : "modelled",
       lastPrediction: calibrated?.lastPrediction ?? null,
       predictionError: Number(calibrated?.error?.value) || 0,
     },
@@ -180,6 +170,31 @@ function pricedTierAt(tiers, tokens) {
   const tier = tierAt(tiers, tokens)
   const priced = Number(tier?.input) > 0 || Number(tier?.output) > 0
   return priced ? tier : null
+}
+
+/**
+ * Price each observed bucket set at the tier its own prefill reaches, then
+ * average the dollars. Pricing an averaged prefill would underbill samples
+ * that crossed a tier boundary.
+ */
+function meanBucketCost(tiers, entry, { output = true } = {}) {
+  const observations =
+    Array.isArray(entry?.recent) && entry.recent.length > 0
+      ? entry.recent
+      : entry?.value
+        ? [entry.value]
+        : []
+  const costs = []
+  for (const buckets of observations) {
+    const prefill =
+      (Number(buckets.input) || 0) +
+      (Number(buckets.read) || 0) +
+      (Number(buckets.write) || 0)
+    const tier = prefill > 0 ? pricedTierAt(tiers, prefill) : null
+    if (!tier) continue
+    costs.push(bucketCost(tier, output ? buckets : { ...buckets, output: 0 }))
+  }
+  return costs.length > 0 ? costs.reduce((total, value) => total + value, 0) / costs.length : null
 }
 
 /** Tokens the host keeps untouched across a compaction: the recent tail. */

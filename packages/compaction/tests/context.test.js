@@ -5,7 +5,7 @@ import path from "node:path"
 
 import { clearPin, readPin, writePin } from "@231self/opencode-shared/state.js"
 
-import { readCalibration } from "../src/calibration.js"
+import { calibrationPath, readCalibration, writeCalibration } from "../src/calibration.js"
 import { runContext } from "../src/context.js"
 import { UsageTracker } from "../src/usage.js"
 
@@ -327,6 +327,145 @@ test("a pin cleared during the advisory is not resurrected", async () => {
   ]
   await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages })
   expect(readPin("opencode", "ses_1", env)).toBeUndefined()
+})
+
+test("a failed calibration commit does not advance the checkpoint or consume the rebuild", async () => {
+  const env = tempEnv()
+  const now = Date.now()
+  const usage = new UsageTracker({ env, now: () => now })
+  writeCalibration({ models: {}, sessions: {} }, env)
+  usage.markPendingRebuild({ sessionID: "ses_1", checkpoint: "cp-0", at: now })
+  usage.noteStepStart({
+    sessionID: "ses_1",
+    model: MODELS[0],
+    at: now + 1,
+    assistantMessageID: "step-1",
+  })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 1_000, cache: { read: 4_000 } },
+    at: now + 2,
+    assistantMessageID: "step-1",
+  })
+  // A directory at the calibration path makes the atomic rename fail.
+  fs.rmSync(calibrationPath(env))
+  fs.mkdirSync(calibrationPath(env), { recursive: true })
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 90_000, afterTokens: 5_000, partsPruned: 0, overflow: false },
+    }),
+  }
+  const { run } = harness({ env, core, usage })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 90_000 },
+    env,
+  )
+  const messages = [
+    {
+      type: "compaction",
+      status: "completed",
+      id: "cp-1",
+      summary: "state ".repeat(50),
+      model: { providerID: "deepseek", id: "deepseek-flash" },
+      tokens: { input: 90_000, output: 500, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
+  ]
+  await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages })
+  const pin = readPin("opencode", "ses_1", env)
+  expect(pin.compaction?.checkpoint).toBeUndefined()
+  expect(usage.peekRebuild("ses_1")?.checkpoint).toBe("cp-0")
+})
+
+test("overflow does not erase a redirect installed during the advisory", async () => {
+  const env = tempEnv()
+  const judge = {
+    async chat() {
+      writePin(
+        "opencode",
+        "ses_1",
+        {
+          model: { providerID: "deepseek", id: "deepseek-flash" },
+          forced: true,
+          redirect: { providerID: "deepseek", id: "deepseek-v4-pro" },
+          lastContextTokens: 0,
+        },
+        env,
+      )
+      return '{"action":"wait","confidence":0.9}'
+    },
+    getCached: () => undefined,
+    setCached: () => {},
+  }
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 500_000, afterTokens: 500_000, partsPruned: 0, overflow: true },
+    }),
+  }
+  const { run } = harness({ env, core, judge })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 0 },
+    env,
+  )
+  const messages = [
+    { info: { role: "user" }, parts: [{ type: "text", text: "keep going ".concat("z".repeat(120000)) }] },
+    { info: { role: "assistant" }, parts: [{ type: "text", text: "working ".concat("w".repeat(120000)) }] },
+  ]
+  await run({
+    sessionID: "ses_1",
+    model: { ...MODELS[0], limit: { context: 100_000, output: 8192 } },
+    system: [],
+    messages,
+  })
+  expect(readPin("opencode", "ses_1", env).redirect).toEqual({
+    providerID: "deepseek",
+    id: "deepseek-v4-pro",
+  })
+})
+
+test("an opaque or empty checkpoint is counted but not learned", async () => {
+  const env = tempEnv()
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 60_000, afterTokens: 40_000, partsPruned: 0, overflow: false },
+    }),
+  }
+  const { run } = harness({ env, core })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 60_000 },
+    env,
+  )
+  await run({
+    sessionID: "ses_1",
+    model: MODELS[0],
+    system: [],
+    messages: [
+      {
+        type: "compaction",
+        status: "completed",
+        id: "cp-native",
+        summary: "",
+        native: {},
+        model: { providerID: "deepseek", id: "deepseek-flash" },
+        tokens: { input: 60_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
+    ],
+  })
+  const entry = readCalibration(env).models["deepseek/deepseek-flash"]
+  expect(entry.summary).toBeUndefined()
+  expect(entry.lastPrediction).toBeUndefined()
+  expect(entry.compactions).toBe(1)
+  expect(entry.request.samples).toBe(1)
 })
 
 test("a context write cannot clobber a newer routing pin", async () => {

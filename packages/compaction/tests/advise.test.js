@@ -107,6 +107,41 @@ test("calibrated compactions supply the summary size and real costs", async () =
   expect(advisory.estimates.predictionError).toBeCloseTo(0.12, 9)
 })
 
+test("measured samples are priced at their own prefill, not the average", async () => {
+  const tiered = {
+    ...PRICED_MODEL,
+    cost: [
+      { input: 1, output: 2, cache: { read: 0.1, write: 1.25 } },
+      { tier: { size: 200_000 }, input: 2, output: 4, cache: { read: 0.2, write: 2.5 } },
+    ],
+  }
+  const calibration = {
+    models: {
+      "deepseek/deepseek-v4-pro": {
+        request: {
+          samples: 2,
+          value: { input: 200_000, output: 0, read: 0, write: 0 },
+          recent: [
+            { input: 150_000, output: 0, read: 0, write: 0 },
+            { input: 250_000, output: 0, read: 0, write: 0 },
+          ],
+        },
+      },
+    },
+  }
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8 }, pin: { cacheHitRatio: 0.8 } },
+    model: tiered,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+    calibration,
+  })
+  // $0.15 at 150k and $0.50 at 250k, averaged as dollars.
+  expect(advisory.estimates.summaryCost).toBeCloseTo(0.325, 9)
+  expect(advisory.estimates.summaryCostSource).toBe("measured")
+})
+
 test("without calibration the summary size and costs are explicitly assumed", async () => {
   const { advisory } = await advise({
     config: { compaction: { expectedTurns: 8, summaryTokens: 1200 }, pin: { cacheHitRatio: 0.8 } },
