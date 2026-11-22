@@ -155,17 +155,21 @@ fn price_of(tier: &crate::types::CostTier) -> f64 {
     tier.input.max(0.0) + tier.output.max(0.0)
 }
 
-/// Price for `tokens` input, honouring context tiers and cache reads.
-fn price_at(model: &PoolModel, tokens: u64) -> (f64, f64, f64) {
+/// Price for `tokens` input, honouring context tiers and cache prices:
+/// `(input, output, cache_read, cache_write)`.
+fn price_at(model: &PoolModel, tokens: u64) -> (f64, f64, f64, f64) {
     let mut chosen: Option<&crate::types::CostTier> = None;
     for tier in &model.cost {
         match &tier.tier {
             Some(definition) if definition.size <= tokens => {
+                // The largest matching tier wins; a bare (non-tiered) entry is
+                // only the default and must not block a tiered match that
+                // follows it in the catalog order.
                 let better = chosen.is_none_or(|current| {
                     current
                         .tier
                         .as_ref()
-                        .is_some_and(|existing| definition.size > existing.size)
+                        .is_none_or(|existing| definition.size > existing.size)
                 });
                 if better {
                     chosen = Some(tier);
@@ -185,9 +189,86 @@ fn price_at(model: &PoolModel, tokens: u64) -> (f64, f64, f64) {
             tier.input.max(0.0),
             tier.output.max(0.0),
             tier.cache.read.max(0.0),
+            tier.cache.write.max(0.0),
         ),
-        None => (0.0, 0.0, 0.0),
+        None => (0.0, 0.0, 0.0, 0.0),
     }
+}
+
+/// The model's projected cost over the pin horizon, charging context debt.
+///
+/// The session's context keeps growing by about one prompt's worth of tokens
+/// per turn. Two consequences belong to the model that incurs them:
+///
+/// 1. **Tier crossings.** Input is priced at the tier the model will be
+///    paying once the context has grown, not today's tier.
+/// 2. **Forced compaction.** A session that outgrows the model's budget
+///    within the horizon must compact, and compaction invalidates the prompt
+///    cache: the compacted prefix is re-written at the cache-write price
+///    instead of being read at the cache-read price.
+///
+/// The result is the better of two context strategies — keep the growing
+/// context, or compact at the overflow point — so the projection mirrors
+/// `contextDebt`/`compactionRoi` on the JS side. A cheap model with a
+/// bloated projected context loses its cost edge to one that can keep going.
+fn projected_cost(model: &PoolModel, ctx: &ScoreContext<'_>, expected_out: u64) -> f64 {
+    let horizon = ctx.settings.pin.max_turns.max(1) as f64;
+    let estimated = ctx.envelope.estimated_input_tokens as f64;
+    // The new prompt is the turn's growth: one prompt's worth per turn.
+    let growth = ctx.envelope.prompt_tokens as f64;
+    let projected = estimated + growth * (horizon - 1.0);
+
+    let (input_price, output_price, cache_read, cache_write) = price_at(model, projected as u64);
+    let pinned = ctx.pin.and_then(|pin| pin.model.as_ref());
+    let cached = pinned.is_some_and(|p| p.same_model(&model.reference()))
+        && ctx.settings.pin.cache_hit_ratio > 0.0
+        && cache_read > 0.0;
+    let ratio = if cached {
+        clamp01(ctx.settings.pin.cache_hit_ratio)
+    } else {
+        0.0
+    };
+
+    let turn_cost = |tokens: f64| {
+        let input_cost = if cached {
+            tokens * (1.0 - ratio) * input_price + tokens * ratio * cache_read
+        } else {
+            tokens * input_price
+        };
+        (input_cost + expected_out as f64 * output_price) / 1_000_000.0
+    };
+
+    // Keep: every turn re-pays the growing prefix. The horizon's mean context
+    // prices the growth without a per-turn loop.
+    let keep = horizon * turn_cost((estimated + projected) / 2.0);
+
+    // Compact: when the projection outgrows the budget the session compacts
+    // within the horizon (modelled at a quarter of the budget) and pays the
+    // cache-invalidation premium on that prefix. Writes without a billed
+    // cache-write price fall back to the input price, matching
+    // `compactionRoi` on the JS side.
+    let budget = model.limit.context as f64 * ctx.settings.limits.context_fit_ratio;
+    let compact = if projected > budget && budget > 0.0 {
+        let compacted = budget / 4.0;
+        let blended = if cached {
+            ratio * cache_read + (1.0 - ratio) * input_price
+        } else {
+            input_price
+        };
+        let write_price = if cache_write > 0.0 {
+            cache_write
+        } else {
+            input_price
+        };
+        let premium = (compacted * (write_price - blended).max(0.0)) / 1_000_000.0;
+        premium + horizon * turn_cost(compacted)
+    } else {
+        f64::INFINITY
+    };
+
+    // Reported per turn so the number keeps its meaning (the modelled cost of
+    // one turn) while carrying the horizon's debt.
+    keep.min(compact) / horizon
 }
 
 fn is_free_local(model: &PoolModel, settings: &Settings) -> bool {
@@ -307,7 +388,6 @@ pub fn evaluate(pool: &[PoolModel], ctx: &ScoreContext<'_>) -> Vec<Candidate> {
         .and_then(|policy| policy.quality_floor)
         .unwrap_or(0.0);
     let required = required_quality(ctx.verdict, &ctx.envelope.turn_class, floor);
-    let joined = ctx.pin.and_then(|pin| pin.model.as_ref());
 
     let mut scored: Vec<Candidate> = Vec::new();
     let mut near: Vec<Candidate> = Vec::new();
@@ -332,29 +412,11 @@ pub fn evaluate(pool: &[PoolModel], ctx: &ScoreContext<'_>) -> Vec<Candidate> {
             continue;
         }
 
-        let expected_in = ctx.envelope.estimated_input_tokens;
         let expected_out = expected_output(model, ctx);
-        let (input_price, output_price, cache_read) = if free_local {
-            (0.0, 0.0, 0.0)
-        } else {
-            price_at(model, expected_in)
-        };
-        let cached = joined.is_some_and(|pinned| {
-            pinned.same_model(&model.reference())
-                && ctx.settings.pin.cache_hit_ratio > 0.0
-                && cache_read > 0.0
-        });
-        let input_tokens = expected_in as f64;
-        let input_cost = if cached {
-            let ratio = clamp01(ctx.settings.pin.cache_hit_ratio);
-            input_tokens * (1.0 - ratio) * input_price + input_tokens * ratio * cache_read
-        } else {
-            input_tokens * input_price
-        };
         let cost_usd = if free_local {
             0.0
         } else {
-            (input_cost + expected_out as f64 * output_price) / 1_000_000.0
+            projected_cost(model, ctx, expected_out)
         };
 
         let shortfall = (required - quality).max(0.0);
@@ -370,9 +432,7 @@ pub fn evaluate(pool: &[PoolModel], ctx: &ScoreContext<'_>) -> Vec<Candidate> {
                         if is_free_local(model, ctx.settings) {
                             return 0.0;
                         }
-                        let (input_price, output_price, _) = price_at(model, expected_in);
-                        (expected_in as f64 * input_price + expected_out as f64 * output_price)
-                            / 1_000_000.0
+                        projected_cost(model, ctx, expected_output(model, ctx))
                     })
                     .collect::<Vec<f64>>(),
             );
@@ -439,7 +499,9 @@ pub fn evaluate(pool: &[PoolModel], ctx: &ScoreContext<'_>) -> Vec<Candidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{CacheCost, Capabilities, CostTier, ModelLimits, TurnInfo, WeightOverride};
+    use crate::types::{
+        CacheCost, Capabilities, CostTier, CostTierDef, ModelLimits, Pin, TurnInfo, WeightOverride,
+    };
 
     fn model(id: &str, input: f64, output: f64, context: u64, quality: Option<f64>) -> PoolModel {
         PoolModel {
@@ -751,5 +813,123 @@ mod tests {
             &ctx(&settings, &verdict, &envelope, "cost"),
         );
         assert!(result.is_empty());
+    }
+
+    fn cache_model(
+        id: &str,
+        input: f64,
+        output: f64,
+        read: f64,
+        write: f64,
+        context: u64,
+    ) -> PoolModel {
+        PoolModel {
+            cost: vec![CostTier {
+                tier: None,
+                input,
+                output,
+                cache: CacheCost { read, write },
+            }],
+            ..model(id, input, output, context, None)
+        }
+    }
+
+    fn growing_envelope(prompt_tokens: u64, last_context_tokens: u64) -> Envelope {
+        crate::envelope::build(&TurnInfo {
+            prompt_text: "work".to_string(),
+            prompt_tokens: Some(prompt_tokens),
+            last_context_tokens,
+            ..TurnInfo::default()
+        })
+    }
+
+    #[test]
+    fn a_model_forced_to_compact_within_the_horizon_is_priced_at_its_compacted_economics() {
+        let settings = settings("cost");
+        let verdict = verdict(3);
+        // estimated 10k, one prompt of growth per turn: projected 24k over 8.
+        let envelope = growing_envelope(2_000, 8_000);
+        let context = ctx(&settings, &verdict, &envelope, "cost");
+        let small = cache_model("small", 1.0, 1.0, 0.1, 1.25, 12_000);
+        let big = cache_model("big", 1.0, 1.0, 0.1, 1.25, 64_000);
+
+        // small: budget 10.8k < projected 24k, so it compacts at 2.7k and pays
+        // the cache-write premium on that prefix.
+        let expected = (2_700.0 * 0.25 + 8.0 * (2_700.0 + 1_200.0)) / 1_000_000.0;
+        assert!((projected_cost(&small, &context, 1_200) - expected / 8.0).abs() < 1e-9);
+
+        // big keeps the growing context; its horizon average is the mean turn.
+        let expected_big = ((10_000.0 + 24_000.0) / 2.0 + 1_200.0) / 1_000_000.0;
+        assert!((projected_cost(&big, &context, 1_200) - expected_big).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_pinned_incumbent_keeps_its_cache_discount_across_the_horizon() {
+        let settings = settings("cost");
+        let verdict = verdict(3);
+        let envelope = growing_envelope(100, 20_000);
+        let big = cache_model("big", 1.0, 1.0, 0.1, 1.25, 64_000);
+        let pin = Pin {
+            model: Some(big.reference()),
+            ..Pin::default()
+        };
+        let warm = ScoreContext {
+            settings: &settings,
+            verdict: &verdict,
+            envelope: &envelope,
+            pin: Some(&pin),
+            agent: None,
+            parent: None,
+            policy: "cost",
+        };
+        // Warm turns at the mean context (20,450) with the 0.8 cache ratio.
+        let expected = (20_450.0 * (0.8 * 0.1 + 0.2 * 1.0) + 1_200.0) / 1_000_000.0;
+        assert!((projected_cost(&big, &warm, 1_200) - expected).abs() < 1e-9);
+
+        let cold = ScoreContext {
+            settings: &settings,
+            verdict: &verdict,
+            envelope: &envelope,
+            pin: None,
+            agent: None,
+            parent: None,
+            policy: "cost",
+        };
+        assert!(projected_cost(&big, &cold, 1_200) > projected_cost(&big, &warm, 1_200) * 3.0);
+    }
+
+    #[test]
+    fn a_tier_crossing_within_the_horizon_is_charged_at_the_projected_tier() {
+        let settings = settings("cost");
+        let verdict = verdict(3);
+        let mut tiered = cache_model("tiered", 1.0, 1.0, 0.1, 1.0, 100_000);
+        tiered.cost.push(CostTier {
+            tier: Some(CostTierDef { size: 20_000 }),
+            input: 4.0,
+            output: 4.0,
+            cache: CacheCost {
+                read: 0.4,
+                write: 4.0,
+            },
+        });
+        let calm = growing_envelope(100, 19_000);
+        let calm_context = ctx(&settings, &verdict, &calm, "cost");
+        let cheap = projected_cost(&tiered, &calm_context, 1_200);
+        let storm = growing_envelope(2_000, 18_000);
+        let storm_context = ctx(&settings, &verdict, &storm, "cost");
+        let dear = projected_cost(&tiered, &storm_context, 1_200);
+        // Crossing the 20k tier within the horizon quadruples the input rate.
+        assert!(dear > cheap * 4.0);
+    }
+
+    #[test]
+    fn without_growth_the_projection_is_the_one_turn_price() {
+        let settings = settings("cost");
+        let verdict = verdict(3);
+        let envelope = growing_envelope(0, 30_000);
+        let context = ctx(&settings, &verdict, &envelope, "cost");
+        let plain = cache_model("plain", 2.0, 3.0, 0.5, 2.0, 100_000);
+        let expected = (30_000.0 * 2.0 + 1_200.0 * 3.0) / 1_000_000.0;
+        assert!((projected_cost(&plain, &context, 1_200) - expected).abs() < 1e-9);
     }
 }
