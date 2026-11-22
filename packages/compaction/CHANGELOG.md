@@ -14,13 +14,14 @@
   at the decision horizon.
 - Real compactions calibrate the estimate. The post-compaction context size
   replaces the assumed summary size; the first post-compaction turn's reported
-  usage replaces the modelled rebuild cost; the summary request is measured
-  when an explicit `/ctx here` marks its boundary. Observations are stored per
+  usage replaces the modelled rebuild cost; the summary request is read from
+  the completed checkpoint's own token usage and model when OpenCode supplies
+  them, and estimated otherwise. Observations are stored per
   model in `compaction-calibration.json`, and `/ctx` labels each number
   measured, estimated, or modelled.
 - Each compaction also records the size the plugin predicted against the size
   the host actually sent. `/ctx` shows the last prediction and the mean
-  absolute percentage error; `bun run compaction:report` prints the same
+  absolute relative error; `bun run compaction:report` prints the same
   calibration for every model without a live session.
 
 ### Fixed
@@ -35,14 +36,21 @@
 - Rebuild capture pairs by assistant-message id and start time, ignores steps
   that started before the checkpoint, and records the model that actually ran
   the step.
-- A delayed advisory re-reads the pin before writing, preserving a newer
-  routing decision, request marker, or context measurement.
-- Calibration updates take a cross-process lock, and checkpoint deduplication
-  lives in the calibration artifact rather than the routing pin, which
-  `clearPin` removes.
-- Prices are resolved per token count (`tierAt`), so a long-context tier is
-  applied to the context that crosses it rather than to every number. An
-  explicit zero cache-write price is no longer replaced by the input price.
+- A delayed advisory re-reads the pin before writing, abandons the write if the
+  pin was deleted, and preserves a newer same-model variant, force flag,
+  request marker, or advisory.
+- Calibration updates take a cross-process lock that fails fast instead of
+  stealing another writer's lock, and checkpoint deduplication lives inside
+  the locked update and in the calibration artifact rather than the routing
+  pin.
+- The prediction compared at the next compaction is the one stored by the last
+  advisory before it, not one reconstructed from the post-compaction tail.
+- Prices are resolved per token count (`tierAt`), including strict `gt`
+  thresholds and partial overrides, and measured samples are priced at their
+  own observed size rather than today's forecast size. An explicit zero
+  cache-write price is no longer replaced by the input price.
+- Cache samples ignore zero-prefill steps and mixed-model turn-log seeds, and
+  the configured window is bounded by the live ring.
 - The economics veto runs after the guard, so a held `compact-now` cannot
   survive an unprofitable estimate. Horizons use net payback for `worth it`.
 - The usage stream's debug path logs a fixed message instead of stringifying

@@ -181,6 +181,31 @@ test("tierAt picks the largest applicable context tier", () => {
   expect(tierAt([], 100_000)).toBeNull()
 })
 
+test("a gt tier starts above its threshold and inherits missing base prices", () => {
+  const tiers = normaliseCost([
+    { input: 1, output: 2, cache: { read: 0.1, write: 1.25 } },
+    { when: { context: { gt: 200_000 } }, input: 2 },
+  ])
+  expect(tierAt(tiers, 200_000).input).toBe(1)
+  expect(tierAt(tiers, 200_001).input).toBe(2)
+  expect(tierAt(tiers, 200_001).output).toBe(2)
+  expect(tierAt(tiers, 200_001).cache.write).toBe(1.25)
+})
+
+test("the decision and the horizon use the same net-payback rule", () => {
+  const roi = compactionRoi({
+    keepCost: 2,
+    steadyCost: 1,
+    firstTurnCost: 1,
+    summaryCost: 8,
+    expectedTurns: 8,
+  })
+  expect(roi.perTurnSavings).toBe(1)
+  expect(roi.breakEvenTurns).toBe(8)
+  expect(roi.netAtHorizon).toBe(0)
+  expect(roi.worthIt).toBe(false)
+})
+
 test("the measured cache state can supply the hit share", () => {
   const price = { input: 1, output: 2, cache: { read: 0.1, write: 1.25 } }
   const base = { price, contextTokens: 100_000, compactedTokens: 10_000, outputTokens: 1000, expectedTurns: 2 }

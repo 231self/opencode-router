@@ -34,6 +34,20 @@ function percent(value) {
   return `${number < 0 ? "-" : "+"}${Math.round(Math.abs(number) * 100)}%`
 }
 
+/** Clip by terminal cells, counting CJK/wide characters as two. */
+function clipCells(value, max) {
+  let out = ""
+  let cells = 0
+  for (const character of String(value ?? "")) {
+    const code = character.codePointAt(0)
+    const width = code >= 0x2e80 ? 2 : 1
+    if (cells + width > max) break
+    out += character
+    cells += width
+  }
+  return out
+}
+
 /** The advisory popup body: one fact per row, 72 columns, hanging indent. */
 export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   const state = pin?.compaction ?? null
@@ -175,7 +189,7 @@ async function runCommand(context, input) {
   }
 
   if (command !== "") {
-    await show(context, prose(`Unknown command: ${String(command).slice(0, 40)}. Try /ctx help.`))
+    await show(context, prose(`Unknown command: ${clipCells(command, 40)}. Try /ctx help.`))
     return
   }
 

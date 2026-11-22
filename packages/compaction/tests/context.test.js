@@ -304,6 +304,31 @@ test("a model decision that lands during the advisory is not overwritten", async
   expect(readPin("opencode", "ses_1", env).model.id).toBe("deepseek-v4-pro")
 })
 
+test("a pin cleared during the advisory is not resurrected", async () => {
+  const env = tempEnv()
+  const judge = {
+    async chat() {
+      clearPin("opencode", "ses_1", env)
+      return '{"action":"wait","confidence":0.9}'
+    },
+    getCached: () => undefined,
+    setCached: () => {},
+  }
+  const { run } = harness({ env, core: {}, judge })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 0 },
+    env,
+  )
+  const messages = [
+    { info: { role: "user" }, parts: [{ type: "text", text: "keep going ".concat("z".repeat(120000)) }] },
+    { info: { role: "assistant" }, parts: [{ type: "text", text: "working ".concat("w".repeat(120000)) }] },
+  ]
+  await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages })
+  expect(readPin("opencode", "ses_1", env)).toBeUndefined()
+})
+
 test("a context write cannot clobber a newer routing pin", async () => {
   const env = tempEnv()
   const core = {

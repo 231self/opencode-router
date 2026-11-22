@@ -33,7 +33,9 @@ function tierDefinition(entry) {
   }
   // V2 client overrides use `when: { context: { gt: size } }`.
   const threshold = Number(entry?.when?.context?.gt)
-  return Number.isFinite(threshold) && threshold > 0 ? { type: "context", size: threshold } : null
+  return Number.isFinite(threshold) && threshold > 0
+    ? { type: "context", size: threshold, gt: true }
+    : null
 }
 
 /**
@@ -287,17 +289,34 @@ export function contextDebt({
 /** The tier that applies at `tokens`: the largest matching size, else base. */
 export function tierAt(tiers, tokens) {
   const list = tiers ?? []
+  const base = list.find((tier) => !tier?.tier) ?? null
+  const pick = (value, fallback) => (value !== undefined ? value : fallback)
+  const merge = (tier) => {
+    if (!tier) return null
+    return {
+      ...base,
+      ...tier,
+      input: pick(tier.input, base?.input),
+      output: pick(tier.output, base?.output),
+      cache: {
+        read: pick(tier.cache?.read, base?.cache?.read),
+        write: pick(tier.cache?.write, base?.cache?.write),
+      },
+    }
+  }
   let chosen = null
   for (const tier of list) {
-    if (!tier?.tier) {
-      if (!chosen) chosen = tier
-      continue
-    }
+    if (!tier?.tier) continue
     const size = Number(tier.tier.size)
-    if (!Number.isFinite(size) || size > tokens) continue
-    if (!chosen?.tier || size > Number(chosen.tier.size)) chosen = tier
+    if (!Number.isFinite(size)) continue
+    const applies = tier.tier.gt ? tokens > size : tokens >= size
+    if (!applies) continue
+    if (!chosen?.tier || size > Number(chosen.tier.size) ||
+        (tier.tier.gt && !chosen.tier.gt && size === Number(chosen.tier.size))) {
+      chosen = tier
+    }
   }
-  return chosen ?? list[0] ?? null
+  return merge(chosen ?? base ?? list[0] ?? null)
 }
 
 export function compactionRoi({
@@ -367,11 +386,14 @@ export function compactionRoi({
       : invalidationCost <= 0
         ? 0
         : Infinity
+  const expected = count(expectedTurns)
+  const net = perTurnSavings * expected - invalidationCost
   return {
     perTurnSavings,
     invalidationCost,
     breakEvenTurns,
-    worthIt: perTurnSavings > 0 && breakEvenTurns <= count(expectedTurns),
+    worthIt: perTurnSavings > 0 && net > 0,
+    netAtHorizon: net,
     summaryCost: Number(summaryCost) || 0,
     rebuildCost: measured ? measuredRebuild : null,
   }

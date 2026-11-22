@@ -129,14 +129,16 @@ bun run compaction:report
 
 That is a checkout command, not part of the installed package. It prints the
 measured summary size, the last predicted-versus-actual size, the mean absolute
-percentage error, the rebuild buckets, and the sample counts per model. If the
+relative error, the rebuild buckets, and the sample counts per model. If the
 prediction error stays large, the summary estimate is not earning its place
 yet. The means are exponential after 20 samples, not a full sliding window.
 
 The cache-lifetime defaults for Anthropic and OpenAI are configurable
 assumptions about those providers, not guarantees. Unknown providers do not
 expire by time. The calibration stream is the OpenCode V2 event API; the Kilo
-transform path has no equivalent measurement and uses the fallbacks.
+transform path has no equivalent measurement and uses the fallbacks. If
+another process holds the calibration lock, the update is skipped and the
+advisory still runs; a crashed writer's `.lock` file needs manual removal.
 
 Two other research tools:
 

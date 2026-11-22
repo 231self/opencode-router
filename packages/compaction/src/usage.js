@@ -48,7 +48,14 @@ export function ttlForProvider(providerID, { ttlByProvider = {}, ttlMs = 0 } = {
  * when the newest step is older than the provider's cache lifetime.
  */
 export function cacheRatio(steps, { ttlMs = 0, now = Date.now() } = {}) {
-  const usable = (steps ?? []).filter((step) => step && Number.isFinite(step.at))
+  const usable = (steps ?? []).filter((step) => {
+    if (!step || !Number.isFinite(step.at)) return false
+    const prefill =
+      (Number(step.tokens?.input) || 0) +
+      (Number(step.tokens?.read) || 0) +
+      (Number(step.tokens?.write) || 0)
+    return prefill > 0
+  })
   if (usable.length === 0) return null
   const lastAt = Math.max(...usable.map((step) => step.at))
   if (ttlMs > 0 && now - lastAt > ttlMs) {
@@ -189,6 +196,7 @@ export class UsageTracker {
     try {
       const persisted = readTurns(this.host, 1000, this.env)
         .filter((turn) => turn?.session === sessionHash(sessionID))
+        .filter((turn) => !Number(turn?.steps) || Number(turn.steps) <= 1)
         .filter((turn) => !target || turn?.usedModel === target)
         .map((turn) => ({
           at: Number(turn.ts) || 0,
@@ -218,7 +226,7 @@ export class UsageTracker {
     ttlByProvider = {},
     ttlMs = 0,
   } = {}) {
-    const size = Math.max(1, Number(window) || DEFAULT_CACHE_WINDOW)
+    const size = Math.min(MAX_STEPS, Math.max(1, Number(window) || DEFAULT_CACHE_WINDOW))
     const { steps: all, source } = this.samplesFor({ sessionID, model })
     const steps = all.slice(-size)
     const computed = cacheRatio(steps, {

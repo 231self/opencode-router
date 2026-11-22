@@ -60,7 +60,7 @@ test("the V2 client cost shape becomes a tier with overrides", () => {
   expect(tiers[0]).toEqual({ input: 4, output: 20, cache: { read: 0.2, write: 5 } })
   expect(tiers).toHaveLength(2)
   expect(tiers[1]).toEqual({
-    tier: { type: "context", size: 200000 },
+    tier: { type: "context", size: 200000, gt: true },
     input: 8,
     output: 40,
     cache: { read: 0.4, write: 10 },

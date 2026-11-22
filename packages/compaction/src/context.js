@@ -113,16 +113,19 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       calibration?.sessions?.[hash]?.checkpoint ?? latest.compaction?.checkpoint ?? "",
     )
     const checkpoint = checkpointOf(event.messages)
-    const newCheckpoint = Boolean(checkpoint?.id && checkpoint.id !== checkpointID)
     const rebuild = checkpointID && usage ? usage.takeRebuild(sessionID) : null
     const usableRebuild = Boolean(rebuild?.tokens && rebuild.checkpoint === checkpointID)
-    if (config.compaction?.enabled !== false && target && (newCheckpoint || usableRebuild)) {
-      const prior = calibrationFor(calibration, target)
-      const priorSummary = Number(prior?.summary?.value)
-      const predictedSummary =
-        Number.isFinite(priorSummary) && priorSummary > 0
-          ? priorSummary
-          : Math.max(0, Number(settings.summaryTokens) || 0)
+    const alreadyCalibrated = Boolean(
+      checkpoint?.id && calibration?.sessions?.[hash]?.checkpoint === checkpoint.id,
+    )
+    let recordedCheckpoint = false
+    if (
+      config.compaction?.enabled !== false &&
+      target &&
+      (usableRebuild || (checkpoint?.id && !alreadyCalibrated))
+    ) {
+      const actualContext = Math.max(0, tokens - systemTokens)
+      const tail = tailTokens(event.messages)
       try {
         calibration = updateCalibration(env, (doc) => {
           let next = doc
@@ -133,35 +136,57 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
               value: rebuild.tokens,
             })
           }
-          if (newCheckpoint) {
-            const actualContext = Math.max(0, tokens - systemTokens)
-            const tail = tailTokens(event.messages)
+          if (checkpoint?.id && doc.sessions?.[hash]?.checkpoint !== checkpoint.id) {
+            const prior = calibrationFor(doc, target)
+            const priorSummary = Number(prior?.summary?.value)
+            const predictedSummary =
+              Number.isFinite(priorSummary) && priorSummary > 0
+                ? priorSummary
+                : Math.max(0, Number(settings.summaryTokens) || 0)
+            // Prefer the prediction stored by the last advisory before the
+            // compaction; fall back to reconstructing it for old pins.
+            const savedPrediction = Number(
+              latest.compaction?.advisory?.estimates?.predictedTotal,
+            )
             next = recordObservation(next, {
               model: target,
               kind: "prediction",
-              value: { predicted: systemTokens + predictedSummary + tail, actual: tokens },
+              value: {
+                predicted:
+                  Number.isFinite(savedPrediction) && savedPrediction > 0
+                    ? savedPrediction
+                    : systemTokens + predictedSummary + tail,
+                actual: tokens,
+              },
             })
-            const summaryText = estimateTokens(checkpoint.summary) + 16
-            const implied = Math.max(summaryText, actualContext - tail)
-            next = recordObservation(next, { model: target, kind: "summary", value: implied })
+            // Learn the textual summary's size, not whatever else survived.
+            // Opaque/native checkpoints have no comparable summary text.
+            const summaryText =
+              typeof checkpoint.summary === "string" && !checkpoint.native
+                ? estimateTokens(checkpoint.summary) + 16
+                : 0
+            if (summaryText > 0) {
+              next = recordObservation(next, { model: target, kind: "summary", value: summaryText })
+            }
             next = recordObservation(next, { model: target, kind: "compaction" })
 
-            const request = checkpoint.tokens
-              ? {
-                  input: Number(checkpoint.tokens.input) || 0,
-                  output:
-                    (Number(checkpoint.tokens.output) || 0) +
-                    (Number(checkpoint.tokens.reasoning) || 0),
-                  read: Number(checkpoint.tokens.cache?.read) || 0,
-                  write: Number(checkpoint.tokens.cache?.write) || 0,
-                }
-              : null
-            if (request && (request.input || request.output || request.read || request.write)) {
-              next = recordObservation(next, {
-                model: checkpoint.model ?? target,
-                kind: "request",
-                value: request,
-              })
+            // Only a known producer model can price a measured summary request.
+            if (checkpoint.model && checkpoint.tokens) {
+              const request = {
+                input: Number(checkpoint.tokens.input) || 0,
+                output:
+                  (Number(checkpoint.tokens.output) || 0) +
+                  (Number(checkpoint.tokens.reasoning) || 0),
+                read: Number(checkpoint.tokens.cache?.read) || 0,
+                write: Number(checkpoint.tokens.cache?.write) || 0,
+              }
+              if (request.input || request.output || request.read || request.write) {
+                next = recordObservation(next, {
+                  model: checkpoint.model,
+                  kind: "request",
+                  value: request,
+                })
+              }
             }
             next = {
               ...next,
@@ -170,13 +195,14 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
                 [hash]: { checkpoint: checkpoint.id, at: Date.now() },
               },
             }
+            recordedCheckpoint = true
           }
           return next
         })
       } catch {
         // A failed calibration write must not block the advisory.
       }
-      if (newCheckpoint) {
+      if (recordedCheckpoint) {
         checkpointID = checkpoint.id
         usage?.markPendingRebuild({ sessionID, checkpoint: checkpoint.id, at: Date.now() })
       }
@@ -221,30 +247,48 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       }
     }
 
-    // Re-read after the last await: a routing decision or a new /ctx request
-    // may have landed while the judge was running. Do not overwrite it.
-    let fresh = latest
+    // Re-read after the last await: a routing decision, a cleared pin, or a
+    // new /ctx request may have landed while the judge was running. Never
+    // resurrect state that was deleted during the wait.
+    let fresh
     try {
-      fresh = readPin(host, sessionID, env) ?? latest
+      fresh = readPin(host, sessionID, env)
     } catch {
-      fresh = latest
+      return
+    }
+    if (fresh == null) {
+      if (latest && (latest.model || latest.compaction || latest.lastContextTokens)) return
+      fresh = {}
     }
     if (fresh.model && target && !sameModel(fresh.model, target)) return
 
-    if (checkpointID) compactionState = { ...(compactionState ?? {}), checkpoint: checkpointID }
-    const requestedAt = fresh.compaction?.requestedAt ?? compactionState?.requestedAt
-    if (requestedAt) compactionState = { ...(compactionState ?? {}), requestedAt }
+    // Overflow may only clear the pin this hook measured. A same-model update
+    // with a different variant, force flag, or redirect is newer state.
+    const sameRouting =
+      JSON.stringify(fresh.model ?? null) === JSON.stringify(latest.model ?? null) &&
+      Boolean(fresh.forced) === Boolean(latest.forced) &&
+      String(fresh.redirect ?? "") === String(latest.redirect ?? "") &&
+      (Number(fresh.since) || 0) === (Number(latest.since) || 0)
+    const compactionUnchanged =
+      JSON.stringify(fresh.compaction ?? null) === JSON.stringify(latest.compaction ?? null)
 
-    const clearStale =
-      overflow &&
-      !fresh.compaction?.requestedAt &&
-      (!fresh.model || sameModel(fresh.model, latest.model))
+    let nextCompaction
+    if (!compactionUnchanged) {
+      // Another writer produced a newer advisory while the judge ran.
+      nextCompaction = { ...(fresh.compaction ?? {}) }
+    } else {
+      nextCompaction = { ...(compactionState ?? {}) }
+      if (fresh.compaction?.requestedAt) nextCompaction.requestedAt = fresh.compaction.requestedAt
+    }
+    if (checkpointID) nextCompaction.checkpoint = checkpointID
+
+    const clearStale = overflow && sameRouting && !fresh.compaction?.requestedAt
     if (clearStale) clearPin(host, sessionID, env)
 
     const next = {
       ...fresh,
       lastOptimiser: optimiser,
-      compaction: compactionState,
+      compaction: nextCompaction,
       ...(clearStale ? { model: undefined, forced: false, redirect: null } : {}),
     }
     if (

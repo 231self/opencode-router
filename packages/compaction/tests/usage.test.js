@@ -21,6 +21,12 @@ const NOW = 1_800_000_000_000
 const CLAUDE = { providerID: "anthropic", id: "claude-opus-5-5" }
 const DEEPSEEK = { providerID: "deepseek", id: "deepseek-v4-pro" }
 
+test("the share is ignored when a step reported no prefill", () => {
+  expect(
+    cacheRatio([{ at: NOW, tokens: { input: 0, output: 5, read: 0, write: 0 } }], { now: NOW }),
+  ).toBeNull()
+})
+
 test("the cache ratio is read over the whole prefill and capped", () => {
   const ratio = cacheRatio(
     [{ at: NOW, tokens: { input: 20_000, read: 80_000, write: 0 } }],

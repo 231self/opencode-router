@@ -9,6 +9,7 @@ import {
   calibrationPath,
   readCalibration,
   recordObservation,
+  updateCalibration,
   writeCalibration,
 } from "../src/calibration.js"
 
@@ -53,6 +54,23 @@ test("one model's observations do not leak into another", () => {
   expect(calibrationFor(calibration, MODEL).summary.value).toBeCloseTo(1000, 6)
   expect(calibrationFor(calibration, OTHER).summary.value).toBeCloseTo(50, 6)
   expect(calibrationFor(calibration, null)).toBeNull()
+})
+
+test("an observation keeps the session dedup metadata", () => {
+  const calibration = recordObservation(
+    { sessions: { abc: { checkpoint: "cp-1" } } },
+    { model: MODEL, kind: "summary", value: 1 },
+  )
+  expect(calibration.sessions.abc.checkpoint).toBe("cp-1")
+})
+
+test("a held lock fails fast instead of stealing it", () => {
+  const env = tempEnv()
+  const file = calibrationPath(env)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(`${file}.lock`, "held")
+  expect(() => updateCalibration(env, (value) => value)).toThrow(/busy/)
+  fs.rmSync(`${file}.lock`)
 })
 
 test("calibration is stored under the shared state directory", () => {

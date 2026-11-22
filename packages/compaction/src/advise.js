@@ -65,26 +65,40 @@ export async function advise({
   // The system prompt survives a compaction, so it belongs on both sides of
   // the comparison; the summary and the recent tail are what change.
   const system = Math.max(0, Number(systemTokens) || 0)
-  const compactedTokens = system + summaryTokens + tailTokens(messages)
+  const tail = tailTokens(messages)
+  const compactedTokens = system + summaryTokens + tail
   const summaryMeasured = Number(calibrated?.summary?.samples) > 0
   const requestMeasured = Number(calibrated?.request?.samples) > 0
   const rebuildMeasured = Number(calibrated?.rebuild?.samples) > 0
   const keepTier = pricedTierAt(tiers, measuredTokens)
   const compactedTier = pricedTierAt(tiers, compactedTokens)
+  const requestPrefill = requestMeasured
+    ? (Number(calibrated.request.value.input) || 0) +
+      (Number(calibrated.request.value.read) || 0) +
+      (Number(calibrated.request.value.write) || 0)
+    : 0
+  const rebuildPrefill = rebuildMeasured
+    ? (Number(calibrated.rebuild.value.input) || 0) +
+      (Number(calibrated.rebuild.value.read) || 0) +
+      (Number(calibrated.rebuild.value.write) || 0)
+    : 0
+  const requestTier = requestPrefill > 0 ? pricedTierAt(tiers, requestPrefill) : null
+  const rebuildTier = rebuildPrefill > 0 ? pricedTierAt(tiers, rebuildPrefill) : null
   let summaryCost = 0
   let keepCost = null
   let steadyCost = null
   let firstTurnCost = null
   if (keepTier && compactedTier) {
-    summaryCost = requestMeasured
-      ? bucketCost(keepTier, calibrated.request.value)
-      : modelledTurnCost({
-          price: keepTier,
-          inputTokens: measuredTokens,
-          prefixTokens: measuredTokens,
-          cacheHitRatio: ratio,
-          outputTokens: summaryTokens,
-        })
+    summaryCost =
+      requestMeasured && requestTier
+        ? bucketCost(requestTier, calibrated.request.value)
+        : modelledTurnCost({
+            price: keepTier,
+            inputTokens: measuredTokens,
+            prefixTokens: measuredTokens,
+            cacheHitRatio: ratio,
+            outputTokens: summaryTokens,
+          })
     keepCost = modelledTurnCost({
       price: keepTier,
       inputTokens: measuredTokens,
@@ -103,8 +117,8 @@ export async function advise({
     firstTurnCost = (compactedTokens / 1_000_000) * writePrice
   }
   const rebuildCost =
-    compactedTier && rebuildMeasured
-      ? bucketCost(compactedTier, { ...calibrated.rebuild.value, output: 0 })
+    compactedTier && rebuildMeasured && rebuildTier
+      ? bucketCost(rebuildTier, { ...calibrated.rebuild.value, output: 0 })
       : null
   const roi =
     keepTier && compactedTier
@@ -137,6 +151,7 @@ export async function advise({
     estimates: {
       summaryTokens,
       summarySource: summaryMeasured ? "measured" : "assumed",
+      predictedTotal: compactedTokens,
       summaryCost,
       summaryCostSource: requestMeasured ? "measured" : "estimated",
       rebuildCost,

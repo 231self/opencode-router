@@ -53,41 +53,39 @@ export function updateCalibration(env = process.env, mutate = (value) => value) 
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const lock = `${file}.lock`
   const wait = new Int32Array(new SharedArrayBuffer(4))
-  const deadline = Date.now() + 1_000
+  const deadline = Date.now() + 200
+  let fd = null
   for (;;) {
-    let fd = null
     try {
       fd = fs.openSync(lock, "wx")
+      break
     } catch (error) {
       if (error.code !== "EEXIST") throw error
       if (Date.now() > deadline) {
-        try {
-          fs.unlinkSync(lock)
-        } catch {
-          // Another writer may have released it first.
-        }
-        continue
+        // Never unlink a lock we did not create: a slow writer may still own
+        // it. A crashed writer's lock needs manual removal; the advisory
+        // continues with its in-memory calibration.
+        throw new Error("compaction calibration lock is busy")
       }
       Atomics.wait(wait, 0, 0, 5)
-      continue
+    }
+  }
+  try {
+    const current = readCalibration(env)
+    const next = mutate(current) ?? current
+    next.at = Date.now()
+    writeJsonAtomic(file, next)
+    return next
+  } finally {
+    try {
+      fs.closeSync(fd)
+    } catch {
+      // The lock file is removed next.
     }
     try {
-      const current = readCalibration(env)
-      const next = mutate(current) ?? current
-      next.at = Date.now()
-      writeJsonAtomic(file, next)
-      return next
-    } finally {
-      try {
-        fs.closeSync(fd)
-      } catch {
-        // Nothing useful to do; the lock file is removed next.
-      }
-      try {
-        fs.unlinkSync(lock)
-      } catch {
-        // A stale-lock cleanup may have removed it already.
-      }
+      fs.unlinkSync(lock)
+    } catch {
+      // A failed unlink leaves a stale lock; do not retry indefinitely.
     }
   }
 }
@@ -145,7 +143,10 @@ function foldBuckets(previous, value) {
 export function recordObservation(calibration, { model, kind, value, at = Date.now() } = {}) {
   const key = modelKey(model)
   if (!key) return calibration
+  // Preserve document metadata such as `sessions`: dropping it would let an
+  // already-calibrated checkpoint count again after a rebuild-only update.
   const next = {
+    ...(calibration ?? {}),
     at,
     models: { ...(calibration?.models ?? {}) },
   }
