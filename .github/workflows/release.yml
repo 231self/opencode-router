@@ -34,16 +34,31 @@ jobs:
       - name: Install binaryen
         run: sudo apt-get update && sudo apt-get install -y binaryen
 
-      # Base image for the runner; npm itself is pinned below.
+      # Base image for the runner; npm itself is pinned below. No
+      # `registry-url`: that makes setup-node write an `.npmrc` with an
+      # `_authToken` placeholder, and npm then tries token auth instead of the
+      # OIDC trusted-publishing exchange.
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
 
       # Staged publishing needs npm >= 11.15 and the OIDC flow needs >= 11.5.1.
       # Pinned deliberately: bump it together with reading the npm changelog.
       - name: Pin npm
         run: npm install -g npm@12.2.3 && npm --version
+
+      - name: Ensure trusted publishing cannot fall back to a token
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NODE_AUTH_TOKEN is set; npm would bypass OIDC" >&2
+            exit 1
+          fi
+          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          if [ -f "$npmrc" ] && grep -q '_authToken' "$npmrc"; then
+            echo "$npmrc contains an _authToken; OIDC would be bypassed" >&2
+            exit 1
+          fi
+          echo "no npm token configured; OIDC will be used"
 
       - name: Verify the release matches the router package
         env:
