@@ -131,6 +131,8 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
           summaryCostSource: "estimated",
           rebuildCost: 0.0012,
           rebuildSource: "measured",
+          lastPrediction: { predicted: 4300, actual: 5100, error: 0.186 },
+          predictionError: 0.12,
         },
         projections: [
           { turns: 3, net: -0.0041, worthIt: false },
@@ -157,6 +159,9 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
   expect(report).toContain("940 tokens (measured)")
   expect(report).toContain("summary cost")
   expect(report).toContain("$0.0012 (measured)")
+  expect(report).toContain("4300 → 5100 (+19%)")
+  expect(report).toContain("mean error")
+  expect(report).toContain("12%")
 })
 
 test("an empty advisory explains itself instead of inventing numbers", () => {

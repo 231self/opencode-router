@@ -18,6 +18,10 @@
   when an explicit `/ctx here` marks its boundary. Observations are stored per
   model in `compaction-calibration.json`, and `/ctx` labels each number
   measured, estimated, or modelled.
+- Each compaction also records the size the plugin predicted against the size
+  the host actually sent. `/ctx` shows the last prediction and the mean
+  absolute error; `bun run compaction:report` prints the same calibration for
+  every model without a live session.
 
 ## 0.1.1 — 2026-11-22
 

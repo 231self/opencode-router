@@ -112,6 +112,8 @@ export async function advise({
       summaryCostSource: requestMeasured ? "measured" : "estimated",
       rebuildCost,
       rebuildSource: rebuildMeasured ? "measured" : "modelled",
+      lastPrediction: calibrated?.lastPrediction ?? null,
+      predictionError: Number(calibrated?.error?.value) || 0,
     },
   })
   return { advisory, guard: nextGuard(guard, advisory) }

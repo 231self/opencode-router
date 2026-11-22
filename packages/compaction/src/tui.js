@@ -29,6 +29,11 @@ function signedDollars(value) {
   return `${number < 0 ? "-" : ""}$${Math.abs(number).toFixed(4)}`
 }
 
+function percent(value) {
+  const number = Number(value) || 0
+  return `${number < 0 ? "-" : "+"}${Math.round(Math.abs(number) * 100)}%`
+}
+
 /** The advisory popup body: one fact per row, 72 columns, hanging indent. */
 export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   const state = pin?.compaction ?? null
@@ -95,6 +100,17 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
                 ? "modelled"
                 : `${dollars(estimates.rebuildCost)} (${estimates.rebuildSource})`,
             ],
+            ...(estimates.lastPrediction
+              ? [
+                  [
+                    "last size",
+                    `${Math.round(estimates.lastPrediction.predicted)} → ${Math.round(
+                      estimates.lastPrediction.actual,
+                    )} (${percent(estimates.lastPrediction.error)})`,
+                  ],
+                  ["mean error", `${Math.round((Number(estimates.predictionError) || 0) * 100)}%`],
+                ]
+              : []),
           ]),
         ]
       : []),

@@ -3,7 +3,7 @@ import { sameModel, refOf } from "@231self/opencode-shared/refs.js"
 import { countContextTokens, estimateTokens, partTokens } from "@231self/opencode-shared/tokens.js"
 
 import { advise, tailTokens } from "./advise.js"
-import { readCalibration, recordObservation, writeCalibration } from "./calibration.js"
+import { readCalibration, recordObservation, writeCalibration, calibrationFor } from "./calibration.js"
 import { applyPlan, buildOptimiseRequest } from "./optimiser.js"
 import { readCompactionNoise } from "./noise.js"
 
@@ -133,8 +133,20 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       if (checkpoint?.id && checkpoint.id !== checkpointID) {
         const systemTokens = countContextTokens({ system: event.system, messages: [] })
         const actual = Math.max(0, tokens - systemTokens)
+        const tail = tailTokens(event.messages)
+        const prior = calibrationFor(calibration, target)
+        const priorSummary = Number(prior?.summary?.value)
+        const predicted =
+          (Number.isFinite(priorSummary) && priorSummary > 0
+            ? priorSummary
+            : Math.max(0, Number(settings.summaryTokens) || 0)) + tail
+        calibration = recordObservation(calibration, {
+          model: target,
+          kind: "prediction",
+          value: { predicted, actual },
+        })
         const summaryText = estimateTokens(checkpoint.summary) + 16
-        const implied = Math.max(summaryText, actual - tailTokens(event.messages))
+        const implied = Math.max(summaryText, actual - tail)
         calibration = recordObservation(calibration, { model: target, kind: "summary", value: implied })
         calibration = recordObservation(calibration, { model: target, kind: "compaction" })
         const since = lastRequestAt || requestedAt

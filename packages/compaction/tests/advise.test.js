@@ -84,6 +84,8 @@ test("calibrated compactions supply the summary size and real costs", async () =
         summary: { value: 5_000, samples: 2 },
         request: { value: { input: 100_000, read: 0, write: 0, output: 5_000 }, samples: 1 },
         rebuild: { value: { input: 1_000, read: 4_000, write: 900, output: 200 }, samples: 1 },
+        lastPrediction: { predicted: 4_300, actual: 5_000, error: 0.1628 },
+        error: { value: 0.12, samples: 2 },
       },
     },
   }
@@ -101,6 +103,8 @@ test("calibrated compactions supply the summary size and real costs", async () =
   expect(advisory.estimates.summaryCostSource).toBe("measured")
   expect(advisory.estimates.rebuildSource).toBe("measured")
   expect(advisory.estimates.rebuildCost).toBeCloseTo(0.002525, 9)
+  expect(advisory.estimates.lastPrediction).toMatchObject({ predicted: 4_300, actual: 5_000 })
+  expect(advisory.estimates.predictionError).toBeCloseTo(0.12, 9)
 })
 
 test("without calibration the summary size and costs are explicitly assumed", async () => {

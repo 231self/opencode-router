@@ -106,6 +106,14 @@ export function recordObservation(calibration, { model, kind, value, at = Date.n
   } else if (kind === "request" || kind === "rebuild") {
     const folded = foldBuckets(entry[kind], value)
     if (folded) entry[kind] = folded
+  } else if (kind === "prediction") {
+    const predicted = Number(value?.predicted) || 0
+    const actual = Number(value?.actual) || 0
+    if (predicted > 0) {
+      const error = (actual - predicted) / predicted
+      entry.error = foldNumber(entry.error, Math.abs(error))
+      entry.lastPrediction = { predicted, actual, error, at }
+    }
   } else if (kind === "compaction") {
     entry.compactions = (Number(entry.compactions) || 0) + 1
     entry.at = at

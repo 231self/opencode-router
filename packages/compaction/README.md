@@ -120,8 +120,17 @@ local judge running (the same oMLX endpoint the router uses).
 
 Real compactions update `~/.local/state/omlx-router/compaction-calibration.json`
 on their own. It stores the rolling summary size, the summary request's token
-buckets, and the first post-compaction turn's buckets per model. Delete it to
-return to the configured assumptions.
+buckets, the first post-compaction turn's buckets, and the error of the last
+size prediction per model. Delete it to return to the configured assumptions.
+
+```sh
+bun run compaction:report
+```
+
+That prints the measured summary size, the last predicted-versus-actual size,
+the mean absolute error, the rebuild buckets, and the sample counts per model.
+If the prediction error stays large, the summary estimate is not earning its
+place yet.
 
 Two other research tools:
 

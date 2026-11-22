@@ -199,6 +199,8 @@ test("a compaction checkpoint calibrates summary size, request cost, and rebuild
   const entry = readCalibration(env).models["deepseek/deepseek-flash"]
   expect(entry.summary.samples).toBe(1)
   expect(entry.summary.value).toBeGreaterThan(100)
+  expect(entry.lastPrediction.actual).toBe(5_000)
+  expect(entry.lastPrediction.predicted).toBeGreaterThan(0)
   expect(entry.request.samples).toBe(1)
   expect(entry.request.value.output).toBe(800)
   expect(entry.compactions).toBe(1)

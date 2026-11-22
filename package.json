@@ -19,6 +19,7 @@
     "judge:calibrate": "bun packages/router/tests/judge-calibration.mjs",
     "compaction:calibrate": "bun packages/compaction/tests/compaction-calibration.mjs",
     "compaction:ablation": "bun packages/compaction/tests/compaction-ablation.mjs",
+    "compaction:report": "bun packages/compaction/tests/compaction-report.mjs",
     "tolerance:eval": "bun packages/compaction/tests/compaction-tolerance.mjs",
     "routing:eval": "bun packages/router/tests/routing-eval.mjs",
     "bench": "bun packages/router/tests/benchmark.mjs",
