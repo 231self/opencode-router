@@ -18,6 +18,8 @@
     "test:e2e:list": "bun packages/router/tests/e2e/run.mjs --list",
     "judge:calibrate": "bun packages/router/tests/judge-calibration.mjs",
     "compaction:calibrate": "bun packages/compaction/tests/compaction-calibration.mjs",
+    "compaction:ablation": "bun packages/compaction/tests/compaction-ablation.mjs",
+    "tolerance:eval": "bun packages/compaction/tests/compaction-tolerance.mjs",
     "routing:eval": "bun packages/router/tests/routing-eval.mjs",
     "bench": "bun packages/router/tests/benchmark.mjs",
     "bench:long": "bun packages/router/tests/benchmark.mjs --long",
