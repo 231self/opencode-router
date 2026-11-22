@@ -100,6 +100,14 @@ test("the rubric prompt carries signals and asks for JSON", () => {
   expect(prompt).toContain('"action"')
 })
 
+test("the rubric hard-bans compaction mid-derivation and on size alone", () => {
+  // Calibration finding (2026-11-22): without these lines the judge called
+  // "compact" 3/3 on a mid-debugging trajectory. They are load-bearing.
+  const prompt = rubricPrompt({ promptText: "", tailDigest: "", signals: {} })
+  expect(prompt).toContain("Partial results must not be discarded.")
+  expect(prompt).toContain("never a reason to compact")
+})
+
 test("refine parses the verdict, repairs once, and never throws", async () => {
   const judge = mockJudge('{"action":"compact","confidence":0.9,"reason":"resolved"}')
   const verdict = await refineVerdict({ judge, signals: {} })

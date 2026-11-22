@@ -24,6 +24,8 @@ export function rubricPrompt({ promptText = "", tailDigest = "", signals = {} })
     "",
     'Reply with JSON only: {"action":"compact"|"delegate"|"wait","confidence":0..1,"reason":"<few words>"}',
     'Choose "compact" only at a sub-task boundary or a converging trajectory; never mid-derivation or while stuck.',
+    'If any work is in progress - a hypothesis being tested, a fix being written, a search still open - reply "wait". Partial results must not be discarded.',
+    'A large context or high token count alone is never a reason to compact.',
     'Choose "delegate" when the next step is review or verification and a fresh, near-empty context would judge it better.',
   ].join("\n")
 }
