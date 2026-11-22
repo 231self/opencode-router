@@ -17,7 +17,10 @@ opencode plugin add @231self/opencode-compaction
 
 - User docs: [`packages/router/README.md`](packages/router/README.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
-- Benchmarks: [`docs/benchmarks/`](docs/benchmarks)
+- Benchmarks: [`docs/benchmarks/`](docs/benchmarks) (routing reports regenerated
+  for 0.3.0; live compaction tolerance run still pending)
+- Research: [`docs/paper/draft.md`](docs/paper/draft.md) — cache-aware
+  compaction economics
 - Releasing: [`docs/releasing.md`](docs/releasing.md) (CI stages over npm
   trusted publishing; a maintainer approves with 2FA)
 - Designs: [`docs/specs/`](docs/specs), [`docs/superpowers/`](docs/superpowers)

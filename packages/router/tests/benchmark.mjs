@@ -682,7 +682,8 @@ async function main() {
 
   const text = markdown(results, suite, { sensitivity: sens, judgeLatency })
   if (options.write) {
-    const target = path.resolve(import.meta.dir, `../docs/benchmarks/${suite.file}`)
+    // The reports live at the repository root, not inside the package.
+    const target = path.resolve(import.meta.dir, `../../../docs/benchmarks/${suite.file}`)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, text)
     console.log(`wrote ${target}`)

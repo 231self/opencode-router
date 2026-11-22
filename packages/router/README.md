@@ -20,7 +20,7 @@ a model that will fail it.
 > context optimiser moved to
 > [`@231self/opencode-compaction`](https://www.npmjs.com/package/@231self/opencode-compaction)
 > (install both for pruning). Design of record:
-> [`docs/specs/2026-11-15-opencode-omlx-router-design.md`](docs/specs/2026-11-15-opencode-omlx-router-design.md).
+> [`docs/specs/2026-11-15-opencode-omlx-router-design.md`](https://github.com/231self/opencode-router/blob/main/docs/specs/2026-11-15-opencode-omlx-router-design.md).
 
 ## Why
 
@@ -62,15 +62,15 @@ turn picked its model, and `/router debug` prints the diagnostic bundle.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — adapter, WASM core, turn flow, subagents, pinning, optimiser.
-- [WASM protocol](docs/protocol.md) — ABI, request/response JSON, need-judge flow, optimiser plans.
-- [Configuration reference](docs/configuration.md) — every key, defaults, examples.
-- [Troubleshooting](docs/troubleshooting.md) — symptoms, evidence, reset.
-- [Building and releasing](docs/releasing.md) — build, pack, publish, tag, consumer install.
-- [Benchmarks](docs/benchmarks/) — routing/cost suites and the live quality eval.
-- [Design spec](docs/specs/2026-11-15-opencode-omlx-router-design.md) and
-  [implementation plan](docs/plans/2026-11-15-implementation.md).
-- [Development notes](docs/development.md) — probe results, verification, limits.
+- [Architecture](https://github.com/231self/opencode-router/blob/main/docs/architecture.md) — adapter, WASM core, turn flow, subagents, pinning, optimiser.
+- [WASM protocol](https://github.com/231self/opencode-router/blob/main/docs/protocol.md) — ABI, request/response JSON, need-judge flow, optimiser plans.
+- [Configuration reference](https://github.com/231self/opencode-router/blob/main/docs/configuration.md) — every key, defaults, examples.
+- [Troubleshooting](https://github.com/231self/opencode-router/blob/main/docs/troubleshooting.md) — symptoms, evidence, reset.
+- [Building and releasing](https://github.com/231self/opencode-router/blob/main/docs/releasing.md) — build, pack, publish, tag, consumer install.
+- [Benchmarks](https://github.com/231self/opencode-router/tree/main/docs/benchmarks) — routing/cost suites and the live quality eval.
+- [Design spec](https://github.com/231self/opencode-router/blob/main/docs/specs/2026-11-15-opencode-omlx-router-design.md) and
+  [implementation plan](https://github.com/231self/opencode-router/blob/main/docs/plans/2026-11-15-implementation.md).
+- [Development notes](https://github.com/231self/opencode-router/blob/main/docs/development.md) — probe results, verification, limits.
 
 ## Requirements
 
@@ -87,7 +87,7 @@ requires Rust with the `wasm32-unknown-unknown` target.
 
 ## Install
 
-Release/build details: [docs/releasing.md](docs/releasing.md).
+Release/build details: [docs/releasing.md](https://github.com/231self/opencode-router/blob/main/docs/releasing.md).
 
 ### OpenCode V2
 
@@ -318,7 +318,7 @@ and `failover.enabled: false` restores plain host behaviour.
 
 ### Context optimiser
 
-Shipped by [`@231self/opencode-compaction`](packages/compaction) — install it
+Shipped by [`@231self/opencode-compaction`](https://github.com/231self/opencode-router/tree/main/packages/compaction) — install it
 alongside the router to get pruning.
 
 When the assembled request fits, **nothing is changed** — cache-safe by
@@ -633,31 +633,35 @@ answer quality.
 
 | Scenario | Short session (10 turns, 7k–34k) | Long session (24 turns, 12k–208k) |
 |---|---:|---:|
-| Router balanced | $0.444 (-50%) · 10/10 | $4.212 (-37%) · 24/24 |
+| Router balanced | $0.444 (-50%) · 10/10 | $6.493 (-3%) · 24/24 |
 | Router switch | $0.409 (-54%) · 10/10 | $4.190 (-38%) · 24/24 |
 | Always frontier | $0.893 · 10/10 | $6.723 · 24/24 |
 | Static complexity tiers | $0.690 (-23%) · 10/10 | $8.020 (+19%) · 24/24 |
 | Fixed cheap model | $0.027 · 6/10 | $0.252 · 14/24 |
 
-At the 80% assumption the two retention modes are effectively cost-neutral in
-the long session (0.5% — inside the assumption's own sensitivity), and `switch`
-is 8% cheaper in the short one. The sensitivity sweep in each report explains
-why: the long session crosses over. At 50% cache reuse, switching every turn is
-14% cheaper than keeping the incumbent; at 95% reuse, keeping is 9% cheaper.
-The 80% default sits near that crossover. `cache` mode pays for its protection
-($5.431 long). These are scenario results at one price table — read them as an
+These reports were regenerated with the 0.3.0 per-turn context projection. The
+long-session `balanced` result moved materially: pricing the incumbent's
+growing context over the pin horizon is what makes `switch` cheaper, and the
+earlier 0.2.x numbers are superseded.
+
+At the 80% assumption `switch` is 35% cheaper than `balanced` in the long
+session. The sensitivity sweep explains the gap: at 50% reuse `switch` costs
+$4.62 against `balanced` $11.14; at 95%, $3.98 against $4.17. Switching stays
+cheaper across this sweep, but the lead shrinks as reuse rises and the two
+modes converge to within 5% at the top. `cache` mode pays for its protection
+($5.541 long). These are scenario results at one price table — read them as an
 operating envelope, not a ranking. The router pool in both suites includes a
 local 27B and 4B at zero cost.
 
 Judge wall-clock is reported next to the dollars in each report. Measured on
-real usage: the judge is consulted on 36% of turns — kept pins, manual pins,
-and deterministic turns skip it — and fresh calls average 1.2 s (p95 1.5 s) on
-a local Qwen3-4B.
+real usage: the judge is consulted on 32% of turns — kept pins, manual pins,
+and deterministic turns skip it — and fresh calls average 1.26 s (p95 1.52 s)
+on a local Qwen3-4B.
 
 Full method and caveats:
-[short session](docs/benchmarks/2026-11-17-routing.md) ·
-[long session](docs/benchmarks/2026-11-17-routing-long.md) ·
-[live quality eval](docs/benchmarks/2026-11-17-quality.md).
+[short session](https://github.com/231self/opencode-router/blob/main/docs/benchmarks/2026-11-17-routing.md) ·
+[long session](https://github.com/231self/opencode-router/blob/main/docs/benchmarks/2026-11-17-routing-long.md) ·
+[live quality eval](https://github.com/231self/opencode-router/blob/main/docs/benchmarks/2026-11-17-quality.md).
 
 The live eval runs eight small coding tasks through fixed models with
 deterministic checks. All three models pass 8/8; the suite is at its ceiling, so

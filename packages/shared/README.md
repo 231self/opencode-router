@@ -24,6 +24,11 @@ and `@231self/opencode-compaction`. Plain ESM, no npm dependencies.
   placeholder handling), and the `~/.local/state/omlx-router/` state paths
   (pins, decisions, turns). One source of truth for the security-sensitive
   parsing and schema.
+- `judge-client.js` — the oMLX judge client: model discovery, JSON-only chat
+  with one repair round, an LRU cache, and timeouts. Each plugin supplies its
+  own system message and validates its own verdict shape. `refs.js` holds
+  model-reference equality, `kilo.js` is the Kilo host shim, and `format.js`
+  is the labelled popup layout shared by the router TUI, the CLI, and Kilo.
 
 Part of the [opencode-router](https://github.com/231self/opencode-router)
 monorepo. Apache-2.0.
