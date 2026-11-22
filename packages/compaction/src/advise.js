@@ -1,4 +1,4 @@
-import { compactionRoi, modelledTurnCost, normaliseCost } from "@231self/opencode-shared/cost.js"
+import { compactionRoi, modelledTurnCost, normaliseCost, tierAt } from "@231self/opencode-shared/cost.js"
 import { partTokens } from "@231self/opencode-shared/tokens.js"
 
 import { composeAdvisory, guardAllows, normaliseHorizons, projectHorizons } from "./advisory.js"
@@ -27,6 +27,7 @@ export async function advise({
   messages = [],
   measuredTokens = 0,
   previousTokens = 0,
+  systemTokens = 0,
   guard = null,
   judge = null,
   refine = null,
@@ -53,7 +54,7 @@ export async function advise({
   // on structure alone (no veto from invented zeros). The hit rate is the
   // measured share when the host reported usage, and the configured fallback
   // only when nothing has been observed.
-  const tier = pricedTier(model)
+  const tiers = normaliseCost(model?.cost)
   const ratio = cache?.ratio ?? (Number(config?.pin?.cacheHitRatio) || 0)
   const calibrated = calibrationFor(calibration, model)
   const measuredSummary = Number(calibrated?.summary?.value)
@@ -61,39 +62,67 @@ export async function advise({
     Number.isFinite(measuredSummary) && measuredSummary > 0
       ? measuredSummary
       : Math.max(0, Number(settings.summaryTokens) || 0)
-  const compactedTokens = summaryTokens + tailTokens(messages)
+  // The system prompt survives a compaction, so it belongs on both sides of
+  // the comparison; the summary and the recent tail are what change.
+  const system = Math.max(0, Number(systemTokens) || 0)
+  const compactedTokens = system + summaryTokens + tailTokens(messages)
   const summaryMeasured = Number(calibrated?.summary?.samples) > 0
   const requestMeasured = Number(calibrated?.request?.samples) > 0
   const rebuildMeasured = Number(calibrated?.rebuild?.samples) > 0
+  const keepTier = pricedTierAt(tiers, measuredTokens)
+  const compactedTier = pricedTierAt(tiers, compactedTokens)
   let summaryCost = 0
-  if (tier) {
+  let keepCost = null
+  let steadyCost = null
+  let firstTurnCost = null
+  if (keepTier && compactedTier) {
     summaryCost = requestMeasured
-      ? bucketCost(tier, calibrated.request.value)
+      ? bucketCost(keepTier, calibrated.request.value)
       : modelledTurnCost({
-          price: tier,
+          price: keepTier,
           inputTokens: measuredTokens,
           prefixTokens: measuredTokens,
           cacheHitRatio: ratio,
           outputTokens: summaryTokens,
         })
+    keepCost = modelledTurnCost({
+      price: keepTier,
+      inputTokens: measuredTokens,
+      prefixTokens: measuredTokens,
+      cacheHitRatio: ratio,
+      outputTokens: 0,
+    })
+    steadyCost = modelledTurnCost({
+      price: compactedTier,
+      inputTokens: compactedTokens,
+      prefixTokens: compactedTokens,
+      cacheHitRatio: ratio,
+      outputTokens: 0,
+    })
+    const writePrice = compactedTier.cache?.write ?? compactedTier.input ?? 0
+    firstTurnCost = (compactedTokens / 1_000_000) * writePrice
   }
   const rebuildCost =
-    tier && rebuildMeasured
-      ? bucketCost(tier, { ...calibrated.rebuild.value, output: 0 })
+    compactedTier && rebuildMeasured
+      ? bucketCost(compactedTier, { ...calibrated.rebuild.value, output: 0 })
       : null
-  const roi = tier
-    ? compactionRoi({
-        price: tier,
-        contextTokens: measuredTokens,
-        compactedTokens,
-        cacheState: null,
-        cacheHitRatio: ratio,
-        outputTokens: 0,
-        expectedTurns: Number(settings.expectedTurns) || 0,
-        summaryCost,
-        rebuildCost,
-      })
-    : null
+  const roi =
+    keepTier && compactedTier
+      ? compactionRoi({
+          price: compactedTier,
+          contextTokens: measuredTokens,
+          compactedTokens,
+          cacheState: null,
+          cacheHitRatio: ratio,
+          outputTokens: 0,
+          expectedTurns: Number(settings.expectedTurns) || 0,
+          summaryCost,
+          rebuildCost,
+          keepCost,
+          steadyCost,
+          firstTurnCost,
+        })
+      : null
   const horizons = normaliseHorizons(settings.horizons)
 
   const advisory = composeAdvisory({
@@ -132,11 +161,9 @@ export function nextGuard(guard, advisory) {
   return { verdict: advisory.verdict, turns, changedTurns }
 }
 
-function pricedTier(model) {
-  const tiers = normaliseCost(model?.cost)
-  const tier = tiers[0] ?? null
-  if (!tier) return null
-  const priced = Number(tier.input) > 0 || Number(tier.output) > 0
+function pricedTierAt(tiers, tokens) {
+  const tier = tierAt(tiers, tokens)
+  const priced = Number(tier?.input) > 0 || Number(tier?.output) > 0
   return priced ? tier : null
 }
 

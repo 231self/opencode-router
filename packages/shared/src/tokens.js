@@ -33,6 +33,11 @@ export function countContextTokens({ system, messages } = {}) {
   let total = 0
   for (const part of system ?? []) total += partTokens(part)
   for (const message of messages ?? []) {
+    // A completed checkpoint carries its summary as text, not as parts.
+    if (message?.type === "compaction") {
+      total += estimateTokens(message.summary ?? "") + 16
+      continue
+    }
     const parts = message?.parts ?? message?.content
     if (typeof parts === "string") total += estimateTokens(parts)
     else if (Array.isArray(parts)) for (const part of parts) total += partTokens(part)

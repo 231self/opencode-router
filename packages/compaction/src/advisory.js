@@ -26,11 +26,14 @@ export function projectHorizons(roi, horizons = DEFAULT_HORIZONS) {
   const savings = Number(roi.perTurnSavings) || 0
   const premium = Number(roi.invalidationCost) || 0
   const breakEven = Number(roi.breakEvenTurns)
-  return normaliseHorizons(horizons).map((turns) => ({
-    turns,
-    net: savings * turns - premium,
-    worthIt: Number.isFinite(breakEven) && breakEven <= turns,
-  }))
+  return normaliseHorizons(horizons).map((turns) => {
+    const net = savings * turns - premium
+    return {
+      turns,
+      net,
+      worthIt: net > 0 && Number.isFinite(breakEven) && breakEven <= turns,
+    }
+  })
 }
 
 /** Turns a verdict change must wait out, scaled by the calibrated instability. */
@@ -83,19 +86,23 @@ export function composeAdvisory({
     source = "judge"
   }
 
-  // The economics veto: compaction is only advised when it pays. A structural
-  // "compact-now" with no break-even becomes "not-yet"; "delegate" needs no
-  // economics (it spends nothing on the current context).
-  if (verdict === "compact-now" && roi && !roi.worthIt) {
-    verdict = "not-yet"
-    confidence = Math.min(confidence, 0.6)
-  }
-
+  // The guard first: it may restore the standing verdict. The economics veto
+  // then applies to the final verdict, so a held "compact-now" cannot survive
+  // an estimate that does not pay.
   const allowed = guardAllows({ guard, verdict, confidence, instability, baseCooldown })
   if (!allowed) {
     verdict = guard?.verdict ?? "not-yet"
     confidence = Math.min(confidence, 0.5)
     source = "guard"
+  }
+
+  // Compaction is only advised when it pays. A structural or held
+  // "compact-now" with no payback becomes "not-yet"; "delegate" needs no
+  // economics because it spends nothing on the current context.
+  if (verdict === "compact-now" && roi && !roi.worthIt) {
+    verdict = "not-yet"
+    confidence = Math.min(confidence, 0.6)
+    source = source === "guard" ? "guard+economics" : "economics"
   }
 
   return {

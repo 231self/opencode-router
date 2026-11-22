@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2 — 2026-11-22
+
+### Changed
+
+- Depends on `@231self/opencode-shared` `^0.1.1`, which adds per-tier cost
+  resolution and measured-cost inputs to the compaction ROI. No router code
+  changes; this release carries the corrected shared dependency floor and the
+  documentation updates from the preceding patches.
+
 ## 0.3.1 — 2026-11-22
 
 ### Changed

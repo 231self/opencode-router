@@ -172,16 +172,16 @@ advisory models repeated compaction within a horizon as one compaction; and
 the growth projection assumes the current prompt is representative. The cache
 hit rate is measured from provider-reported usage over recent steps, with
 idle expiry for providers whose cache lifetime is known. The compacted size is
-now calibrated from observed checkpoints, and the rebuild cost comes from the
-first post-compaction turn when the host reports it. The summary request is
-still estimated unless an explicit request marks its boundary; a native
-compaction cannot be attributed that way. The direction of the error is mixed
-rather than one-sided: a summary larger than the estimate understates the
-premium and makes compaction look cheaper, while a prompt busier than average
-overstates growth and makes it look dearer. The verdict layer's generalization
-rests on a four-case calibration and a small local judge; the artifact
-mechanism (calibrate, store, respect the band) is the claim, not any single
-verdict.
+now calibrated from observed checkpoints, the rebuild cost comes from the
+first post-compaction turn when the host reports it, and the summary request's
+own tokens and model are read from the completed checkpoint. The remaining
+estimate is the pre-compaction projection when the host supplies no usage. The
+direction of the error is mixed rather than one-sided: a summary larger than
+the estimate understates the premium and makes compaction look cheaper, while
+a prompt busier than average overstates growth and makes it look dearer. The
+verdict layer's generalization rests on a four-case calibration and a small
+local judge; the artifact mechanism (calibrate, store, respect the band) is
+the claim, not any single verdict.
 
 ## References (working)
 

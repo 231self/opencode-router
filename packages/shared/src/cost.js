@@ -284,6 +284,22 @@ export function contextDebt({
  *
  * Missing prices read as 0; counts are clamped to finite, non-negative values.
  */
+/** The tier that applies at `tokens`: the largest matching size, else base. */
+export function tierAt(tiers, tokens) {
+  const list = tiers ?? []
+  let chosen = null
+  for (const tier of list) {
+    if (!tier?.tier) {
+      if (!chosen) chosen = tier
+      continue
+    }
+    const size = Number(tier.tier.size)
+    if (!Number.isFinite(size) || size > tokens) continue
+    if (!chosen?.tier || size > Number(chosen.tier.size)) chosen = tier
+  }
+  return chosen ?? list[0] ?? null
+}
+
 export function compactionRoi({
   price: tier,
   contextTokens,
@@ -294,33 +310,56 @@ export function compactionRoi({
   expectedTurns = 0,
   summaryCost = 0,
   rebuildCost = null,
+  keepCost = null,
+  steadyCost = null,
+  firstTurnCost = null,
 }) {
   const context = count(contextTokens)
   const compacted = count(compactedTokens)
   const derived = cacheHitRatio == null && cacheState ? cacheHitShare(cacheState) : 0
   const ratio = Math.min(1, Math.max(0, Number(cacheHitRatio ?? derived) || 0))
   const output = count(outputTokens)
-  const keep = modelledTurnCost({
-    price: tier,
-    inputTokens: context,
-    prefixTokens: context,
-    cacheHitRatio: ratio,
-    outputTokens: output,
-  })
-  const steady = modelledTurnCost({
-    price: tier,
-    inputTokens: compacted,
-    prefixTokens: compacted,
-    cacheHitRatio: ratio,
-    outputTokens: output,
-  })
+  const keep =
+    keepCost != null
+      ? Number(keepCost) || 0
+      : modelledTurnCost({
+          price: tier,
+          inputTokens: context,
+          prefixTokens: context,
+          cacheHitRatio: ratio,
+          outputTokens: output,
+        })
+  const steady =
+    steadyCost != null
+      ? Number(steadyCost) || 0
+      : modelledTurnCost({
+          price: tier,
+          inputTokens: compacted,
+          prefixTokens: compacted,
+          cacheHitRatio: ratio,
+          outputTokens: output,
+        })
   const perTurnSavings = keep - steady
   const writePrice = tier?.cache?.write ?? tier?.input ?? 0
   const firstTurn =
-    (compacted / 1_000_000) * writePrice + (output / 1_000_000) * (tier?.output ?? 0)
+    firstTurnCost != null
+      ? Number(firstTurnCost) || 0
+      : (compacted / 1_000_000) * writePrice + (output / 1_000_000) * (tier?.output ?? 0)
+  // Measured rebuild is input-side only; compare it with an input-only steady
+  // turn so a normal turn's output never leaks into the compaction premium.
+  const steadyInput =
+    steadyCost != null
+      ? Number(steadyCost) || 0
+      : modelledTurnCost({
+          price: tier,
+          inputTokens: compacted,
+          prefixTokens: compacted,
+          cacheHitRatio: ratio,
+          outputTokens: 0,
+        })
   const measuredRebuild = Number(rebuildCost)
   const measured = rebuildCost != null && Number.isFinite(measuredRebuild) && measuredRebuild >= 0
-  const premium = measured ? measuredRebuild - steady : firstTurn - steady
+  const premium = measured ? measuredRebuild - steadyInput : firstTurn - steady
   const invalidationCost = premium + (Number(summaryCost) || 0)
   const breakEvenTurns =
     perTurnSavings > 0
@@ -332,7 +371,7 @@ export function compactionRoi({
     perTurnSavings,
     invalidationCost,
     breakEvenTurns,
-    worthIt: breakEvenTurns <= count(expectedTurns),
+    worthIt: perTurnSavings > 0 && breakEvenTurns <= count(expectedTurns),
     summaryCost: Number(summaryCost) || 0,
     rebuildCost: measured ? measuredRebuild : null,
   }

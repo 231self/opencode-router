@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.1 — 2026-11-22
+
+### Added
+
+- `tierAt` resolves the price tier that applies at a token count, so callers
+  can price the keep, compacted, summary, and rebuild contexts independently.
+- `compactionRoi` accepts `keepCost`, `steadyCost`, `firstTurnCost`,
+  `summaryCost`, and `rebuildCost`, letting a caller supply measured costs
+  instead of a single flat tier.
+
+### Fixed
+
+- `countContextTokens` counts a completed compaction checkpoint's summary.
+  It was previously invisible to the fallback counter and to the optimiser,
+  so a compacted context was measured without the text it retained.
+- A measured rebuild premium compares input-side costs only; a normal turn's
+  output tokens no longer leak into the compaction cost.
+- Negative per-turn savings are never reported as `worthIt`, even when a
+  one-time credit makes the break-even zero.
+
 ## 0.1.0 — 2026-11-22
 
 ### Added

@@ -144,7 +144,7 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
   }
   const report = advisoryReport(pin, { noise: { instability: 0.25 }, expectedTurns: 8 })
   const lines = report.split("\n")
-  for (const line of lines) expect(line.length).toBeLessThanOrEqual(80)
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(72)
   expect(report).toContain("compact-now")
   expect(report).toContain("break-even")
   expect(report).toContain("2 turns")
@@ -167,7 +167,7 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
 test("an empty advisory explains itself instead of inventing numbers", () => {
   const report = advisoryReport(null, {})
   expect(report).toContain("No advisory yet")
-  for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(80)
+  for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
 })
 
 test("the TUI slash command does not shadow the host's native /compact", () => {

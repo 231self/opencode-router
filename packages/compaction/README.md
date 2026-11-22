@@ -49,10 +49,10 @@ signals are unclear — a small local judge answering a rubric. The verdict
 cannot flicker: changes wait out a cooldown that grows with the judge's
 measured instability.
 
-The price uses the host's reported usage, not a fixed guess. The cache hit
-rate is the share the provider served from cache over the last five steps on
-the current model. An idle gap longer than the provider's cache lifetime is
-treated as a cold cache. `/ctx` shows the rate, its source, and the sample
+The cache hit rate is the share the provider served from cache over the last
+five steps on the current model, or the router's turn log after a plugin
+restart. An idle gap longer than the provider's cache lifetime is treated as a
+cold cache. `/ctx` shows the rate, its source, and the sample
 count; the configured `pin.cacheHitRatio` is only the fallback before the
 first measurement.
 
@@ -64,9 +64,9 @@ The compacted size and the one-time cost are calibrated from real compactions.
 After each checkpoint the plugin compares its prediction with the context the
 host actually sent and uses the rolling observed size. The first
 post-compaction turn's reported reads, writes, and misses replace the modelled
-rebuild cost. The summary request is measured when an explicit `/ctx here`
-marks the boundary; otherwise its cost is estimated from the context it had to
-read and the summary it produced.
+rebuild cost. The summary request is measured from the completed checkpoint's
+own token usage and model when OpenCode supplies them; otherwise its cost is
+estimated from the context it had to read and the summary it produced.
 
 **`/ctx`** in the TUI shows the current verdict with its numbers and what to
 do about it. **`/ctx here`** asks the host to compact this session; the
@@ -127,10 +127,16 @@ size prediction per model. Delete it to return to the configured assumptions.
 bun run compaction:report
 ```
 
-That prints the measured summary size, the last predicted-versus-actual size,
-the mean absolute error, the rebuild buckets, and the sample counts per model.
-If the prediction error stays large, the summary estimate is not earning its
-place yet.
+That is a checkout command, not part of the installed package. It prints the
+measured summary size, the last predicted-versus-actual size, the mean absolute
+percentage error, the rebuild buckets, and the sample counts per model. If the
+prediction error stays large, the summary estimate is not earning its place
+yet. The means are exponential after 20 samples, not a full sliding window.
+
+The cache-lifetime defaults for Anthropic and OpenAI are configurable
+assumptions about those providers, not guarantees. Unknown providers do not
+expire by time. The calibration stream is the OpenCode V2 event API; the Kilo
+transform path has no equivalent measurement and uses the fallbacks.
 
 Two other research tools:
 
@@ -150,10 +156,12 @@ punished for refusing to answer from missing evidence.
 
 The cache hit rate is measured from provider-reported usage. The compacted
 size is calibrated from observed checkpoints, and the rebuild cost comes from
-the first post-compaction turn when the host reports it. The summary request is
-still estimated unless an explicit `/ctx here` request marks its boundary; a
-native compaction cannot be attributed that way. `/ctx` labels each number
-`measured`, `estimated`, or `modelled` so the difference stays visible.
+the first post-compaction turn when the host reports it. When OpenCode includes
+the compaction request's own tokens on the checkpoint, that is used; otherwise
+the summary cost is estimated. Native and automatic compactions are calibrated
+the same way, because the checkpoint carries the fields. `/ctx` labels each
+number `measured`, `estimated`, `turn log`, or `modelled` so the difference
+stays visible.
 
 ## Privacy
 

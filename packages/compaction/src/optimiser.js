@@ -32,11 +32,23 @@ export function buildOptimiseRequest({ model, config, system = [], messages = []
     output: Number(model?.limit?.output) || 0,
   }
   const label = model ? `${model.providerID}/${model.id ?? model.modelID}` : ""
-  const mapped = messages.map((message, index) => ({
-    index,
-    role: message?.info?.role ?? message?.role ?? "",
-    parts: (message?.parts ?? []).map((part, partIndex) => partInput(part, partIndex)).filter(Boolean),
-  }))
+  const mapped = messages.map((message, index) => {
+    // A completed checkpoint's summary is top-level text, not a part. Count
+    // it like the shared counter so the optimiser's before/after sizes agree
+    // with the rest of the plugin.
+    if (message?.type === "compaction" && typeof message.summary === "string") {
+      return {
+        index,
+        role: "compaction",
+        parts: [{ index: 0, type: "text", tokens: estimateTokens(message.summary) + 16 }],
+      }
+    }
+    return {
+      index,
+      role: message?.info?.role ?? message?.role ?? "",
+      parts: (message?.parts ?? []).map((part, partIndex) => partInput(part, partIndex)).filter(Boolean),
+    }
+  })
   return {
     abi: 1,
     model: { label, limit },

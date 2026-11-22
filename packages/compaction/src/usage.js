@@ -22,7 +22,7 @@ export const DEFAULT_CACHE_WINDOW = 5
 
 const RATIO_CAP = 0.95
 const MAX_SESSIONS = 32
-const MAX_STEPS = 20
+const MAX_STEPS = 50
 
 function tokensOf(value) {
   return {
@@ -82,43 +82,73 @@ export class UsageTracker {
   state(sessionID) {
     const key = String(sessionID)
     let state = this.sessions.get(key)
-    if (!state) {
-      state = { steps: [], current: null, pending: null, rebuild: null }
+    if (state) {
+      // Refresh recency so an active session is not pruned by a burst of new
+      // ones.
+      this.sessions.delete(key)
       this.sessions.set(key, state)
-      if (this.sessions.size > MAX_SESSIONS) {
-        const oldest = this.sessions.keys().next().value
-        if (oldest !== undefined && oldest !== key) this.sessions.delete(oldest)
-      }
+      return state
+    }
+    state = { steps: [], current: null, active: new Map(), pending: null, rebuild: null }
+    this.sessions.set(key, state)
+    if (this.sessions.size > MAX_SESSIONS) {
+      const oldest = this.sessions.keys().next().value
+      if (oldest !== undefined && oldest !== key) this.sessions.delete(oldest)
     }
     return state
   }
 
   /** `session.step.started`: the model is known here, the usage is not. */
-  noteStepStart({ sessionID, model, at } = {}) {
+  noteStepStart({ sessionID, model, at, assistantMessageID } = {}) {
     if (!sessionID) return
     const state = this.state(sessionID)
-    state.current = { model: refOf(model), at: Number(at) || this.now() }
+    const step = {
+      id: assistantMessageID ?? null,
+      model: refOf(model),
+      at: Number(at) || this.now(),
+    }
+    state.current = step
+    if (step.id) {
+      state.active.set(String(step.id), step)
+      if (state.active.size > MAX_STEPS) {
+        const oldest = state.active.keys().next().value
+        if (oldest !== undefined) state.active.delete(oldest)
+      }
+    }
   }
 
   /** `session.step.ended`: attach the reported usage to the step's model. */
-  noteStepEnd({ sessionID, tokens, at } = {}) {
+  noteStepEnd({ sessionID, tokens, at, assistantMessageID } = {}) {
     if (!sessionID) return
     const state = this.state(sessionID)
+    const key = assistantMessageID == null ? null : String(assistantMessageID)
+    // An id that never started is unknown, not the last step: guessing here
+    // would attach another model's usage to this one.
+    const step = key ? state.active.get(key) ?? null : state.current || null
+    if (key) state.active.delete(key)
+    if (state.current === step) state.current = null
+
     const stamp = Number(at) || this.now()
     const buckets = tokensOf(tokens)
-    state.steps.push({
-      at: stamp,
-      model: state.current?.model ?? null,
-      tokens: buckets,
-    })
+    state.steps.push({ at: stamp, model: step?.model ?? null, tokens: buckets })
     if (state.steps.length > MAX_STEPS) state.steps.splice(0, state.steps.length - MAX_STEPS)
-    if (state.pending) {
-      // The first step after a checkpoint is the rebuild of the compacted
-      // prefix; the context hook that saw the checkpoint runs before it.
-      state.rebuild = { tokens: buckets, at: stamp, checkpoint: state.pending.checkpoint }
+
+    const prefill = buckets.input + buckets.read + buckets.write
+    if (
+      state.pending &&
+      step &&
+      step.at >= state.pending.at &&
+      prefill > 0
+    ) {
+      // Only a step that started after the checkpoint is the rebuild turn.
+      state.rebuild = {
+        tokens: buckets,
+        at: stamp,
+        checkpoint: state.pending.checkpoint,
+        model: step.model ?? null,
+      }
       state.pending = null
     }
-    state.current = null
   }
 
   /** Mark the checkpoint whose next model step is the rebuild turn. */
@@ -144,19 +174,20 @@ export class UsageTracker {
   }
 
   /**
-   * Steps for one session and model. In-memory samples win; when the plugin
-   * restarted, the router's persisted turns stand in for them.
+   * Samples for one session and model, with their provenance. In-memory steps
+   * win; the router's persisted turns are a coarser restart seed and are
+   * labelled `turn-log` rather than passed off as per-step measurements.
    */
-  stepsFor({ sessionID, model } = {}) {
-    if (!sessionID) return []
+  samplesFor({ sessionID, model } = {}) {
+    if (!sessionID) return { steps: [], source: "fallback" }
     const memory = this.state(sessionID).steps.filter(
       (step) => step.model && (!model || sameModel(step.model, model)),
     )
-    if (memory.length > 0) return memory
+    if (memory.length > 0) return { steps: memory, source: "measured" }
 
     const target = model ? `${model.providerID}/${model.id}` : null
     try {
-      return readTurns(this.host, 1000, this.env)
+      const persisted = readTurns(this.host, 1000, this.env)
         .filter((turn) => turn?.session === sessionHash(sessionID))
         .filter((turn) => !target || turn?.usedModel === target)
         .map((turn) => ({
@@ -164,9 +195,15 @@ export class UsageTracker {
           model: model ? refOf(model) : null,
           tokens: tokensOf(turn.tokens),
         }))
+      return { steps: persisted, source: persisted.length > 0 ? "turn-log" : "fallback" }
     } catch {
-      return []
+      return { steps: [], source: "fallback" }
     }
+  }
+
+  /** Steps for one session and model, ignoring provenance. */
+  stepsFor({ sessionID, model } = {}) {
+    return this.samplesFor({ sessionID, model }).steps
   }
 
   /**
@@ -182,7 +219,8 @@ export class UsageTracker {
     ttlMs = 0,
   } = {}) {
     const size = Math.max(1, Number(window) || DEFAULT_CACHE_WINDOW)
-    const steps = this.stepsFor({ sessionID, model }).slice(-size)
+    const { steps: all, source } = this.samplesFor({ sessionID, model })
+    const steps = all.slice(-size)
     const computed = cacheRatio(steps, {
       ttlMs: ttlForProvider(model?.providerID, { ttlByProvider, ttlMs }),
       now: this.now(),
@@ -190,6 +228,6 @@ export class UsageTracker {
     if (!computed) {
       return { ratio: Number(fallback) || 0, samples: 0, source: "fallback", lastAt: 0 }
     }
-    return { ...computed, source: computed.expired ? "expired" : "measured" }
+    return { ...computed, source: computed.expired ? "expired" : source }
   }
 }

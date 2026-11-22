@@ -1,9 +1,14 @@
-import { clearPin, readPin, writePin } from "@231self/opencode-shared/state.js"
+import { clearPin, readPin, sessionHash, writePin } from "@231self/opencode-shared/state.js"
 import { sameModel, refOf } from "@231self/opencode-shared/refs.js"
-import { countContextTokens, estimateTokens, partTokens } from "@231self/opencode-shared/tokens.js"
+import { countContextTokens, estimateTokens } from "@231self/opencode-shared/tokens.js"
 
 import { advise, tailTokens } from "./advise.js"
-import { readCalibration, recordObservation, writeCalibration, calibrationFor } from "./calibration.js"
+import {
+  calibrationFor,
+  readCalibration,
+  recordObservation,
+  updateCalibration,
+} from "./calibration.js"
 import { applyPlan, buildOptimiseRequest } from "./optimiser.js"
 import { readCompactionNoise } from "./noise.js"
 
@@ -55,19 +60,6 @@ function checkpointOf(messages) {
   return null
 }
 
-/** Sum the token buckets of one or more steps. */
-function aggregateSteps(steps) {
-  if (!Array.isArray(steps) || steps.length === 0) return null
-  const total = { input: 0, read: 0, write: 0, output: 0 }
-  for (const step of steps) {
-    total.input += Number(step?.tokens?.input) || 0
-    total.read += Number(step?.tokens?.read) || 0
-    total.write += Number(step?.tokens?.write) || 0
-    total.output += Number(step?.tokens?.output) || 0
-  }
-  return total.input || total.read || total.write || total.output ? total : null
-}
-
 /**
  * The V2 `context` hook: optimise the live context and record its measurement
  * in the session pin. A failed measurement or prune must never break a turn.
@@ -76,9 +68,6 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
   try {
     const sessionID = event?.sessionID
     if (!sessionID) return
-    const before = readPin(host, sessionID, env) ?? {}
-    const pendingRequest = Number(before.compaction?.requestedAt) || 0
-    const requestedAt = pendingRequest || Number(before.compaction?.lastRequestAt) || 0
     await honorCompactRequest({ host, env, ctx, sessionID })
     const model = await modelFor(ctx, event?.model)
     let tokens = null
@@ -112,60 +101,86 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     // measuring. Never overwrite that decision with stale context state.
     if (latest.model && target && !sameModel(latest.model, target)) return
 
-    // Calibration from real compactions. Summary size comes from comparing
-    // the predicted checkpoint with the context the host actually sends;
-    // rebuild usage comes from the first step after the checkpoint; summary
-    // cost is only attributed when an explicit request marks the boundary.
+    // Calibration from real compactions. OpenCode puts the compaction request's
+    // model and token usage on the completed checkpoint, so nothing is inferred
+    // from timestamps. Summary size comes from the context the host actually
+    // sends; rebuild usage comes from the first model step after the checkpoint.
     const settings = config.compaction ?? {}
+    const systemTokens = countContextTokens({ system: event.system, messages: [] })
+    const hash = sessionHash(sessionID)
     let calibration = readCalibration(env)
-    let calibrationChanged = false
-    let checkpointID = latest.compaction?.checkpoint ?? null
-    let lastRequestAt = Number(latest.compaction?.lastRequestAt) || 0
-    let checkpointSeen = false
-    if (config.compaction?.enabled !== false && target) {
-      const rebuild = checkpointID && usage ? usage.takeRebuild(sessionID) : null
-      if (rebuild?.tokens && rebuild.checkpoint === checkpointID) {
-        calibration = recordObservation(calibration, { model: target, kind: "rebuild", value: rebuild.tokens })
-        calibrationChanged = true
-      }
+    let checkpointID = String(
+      calibration?.sessions?.[hash]?.checkpoint ?? latest.compaction?.checkpoint ?? "",
+    )
+    const checkpoint = checkpointOf(event.messages)
+    const newCheckpoint = Boolean(checkpoint?.id && checkpoint.id !== checkpointID)
+    const rebuild = checkpointID && usage ? usage.takeRebuild(sessionID) : null
+    const usableRebuild = Boolean(rebuild?.tokens && rebuild.checkpoint === checkpointID)
+    if (config.compaction?.enabled !== false && target && (newCheckpoint || usableRebuild)) {
+      const prior = calibrationFor(calibration, target)
+      const priorSummary = Number(prior?.summary?.value)
+      const predictedSummary =
+        Number.isFinite(priorSummary) && priorSummary > 0
+          ? priorSummary
+          : Math.max(0, Number(settings.summaryTokens) || 0)
+      try {
+        calibration = updateCalibration(env, (doc) => {
+          let next = doc
+          if (usableRebuild) {
+            next = recordObservation(next, {
+              model: rebuild.model ?? target,
+              kind: "rebuild",
+              value: rebuild.tokens,
+            })
+          }
+          if (newCheckpoint) {
+            const actualContext = Math.max(0, tokens - systemTokens)
+            const tail = tailTokens(event.messages)
+            next = recordObservation(next, {
+              model: target,
+              kind: "prediction",
+              value: { predicted: systemTokens + predictedSummary + tail, actual: tokens },
+            })
+            const summaryText = estimateTokens(checkpoint.summary) + 16
+            const implied = Math.max(summaryText, actualContext - tail)
+            next = recordObservation(next, { model: target, kind: "summary", value: implied })
+            next = recordObservation(next, { model: target, kind: "compaction" })
 
-      const checkpoint = checkpointOf(event.messages)
-      if (checkpoint?.id && checkpoint.id !== checkpointID) {
-        const systemTokens = countContextTokens({ system: event.system, messages: [] })
-        const actual = Math.max(0, tokens - systemTokens)
-        const tail = tailTokens(event.messages)
-        const prior = calibrationFor(calibration, target)
-        const priorSummary = Number(prior?.summary?.value)
-        const predicted =
-          (Number.isFinite(priorSummary) && priorSummary > 0
-            ? priorSummary
-            : Math.max(0, Number(settings.summaryTokens) || 0)) + tail
-        calibration = recordObservation(calibration, {
-          model: target,
-          kind: "prediction",
-          value: { predicted, actual },
+            const request = checkpoint.tokens
+              ? {
+                  input: Number(checkpoint.tokens.input) || 0,
+                  output:
+                    (Number(checkpoint.tokens.output) || 0) +
+                    (Number(checkpoint.tokens.reasoning) || 0),
+                  read: Number(checkpoint.tokens.cache?.read) || 0,
+                  write: Number(checkpoint.tokens.cache?.write) || 0,
+                }
+              : null
+            if (request && (request.input || request.output || request.read || request.write)) {
+              next = recordObservation(next, {
+                model: checkpoint.model ?? target,
+                kind: "request",
+                value: request,
+              })
+            }
+            next = {
+              ...next,
+              sessions: {
+                ...(next.sessions ?? {}),
+                [hash]: { checkpoint: checkpoint.id, at: Date.now() },
+              },
+            }
+          }
+          return next
         })
-        const summaryText = estimateTokens(checkpoint.summary) + 16
-        const implied = Math.max(summaryText, actual - tail)
-        calibration = recordObservation(calibration, { model: target, kind: "summary", value: implied })
-        calibration = recordObservation(calibration, { model: target, kind: "compaction" })
-        const since = lastRequestAt || requestedAt
-        const steps = since > 0 && usage ? usage.stepsSince({ sessionID, model: target, at: since }) : []
-        const request = aggregateSteps(steps)
-        if (request) {
-          calibration = recordObservation(calibration, { model: target, kind: "request", value: request })
-        }
-        checkpointID = checkpoint.id
-        lastRequestAt = 0
-        checkpointSeen = true
-        calibrationChanged = true
-        usage?.markPendingRebuild({ sessionID, checkpoint: checkpoint.id })
+      } catch {
+        // A failed calibration write must not block the advisory.
       }
-      if (calibrationChanged) writeCalibration(calibration, env)
+      if (newCheckpoint) {
+        checkpointID = checkpoint.id
+        usage?.markPendingRebuild({ sessionID, checkpoint: checkpoint.id, at: Date.now() })
+      }
     }
-    // A refused request must not leave a stale cutoff that later attributes an
-    // unrelated compaction's steps. Keep it for the turn the host was asked.
-    if (!checkpointSeen && !pendingRequest) lastRequestAt = 0
 
     // The advisory (structure + compaction economics + optional judge) with
     // its flip-flop guard state, stored beside the routing state.
@@ -193,6 +208,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
           messages: event.messages ?? [],
           measuredTokens: tokens,
           previousTokens: Number(latest.lastContextTokens) || 0,
+          systemTokens,
           guard: latest.compaction ?? null,
           judge,
           cache,
@@ -205,28 +221,39 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       }
     }
 
-    if (compactionState && (checkpointID || lastRequestAt)) {
-      compactionState = {
-        ...compactionState,
-        ...(checkpointID ? { checkpoint: checkpointID } : {}),
-      }
-      if (lastRequestAt) compactionState.lastRequestAt = lastRequestAt
-      else delete compactionState.lastRequestAt
+    // Re-read after the last await: a routing decision or a new /ctx request
+    // may have landed while the judge was running. Do not overwrite it.
+    let fresh = latest
+    try {
+      fresh = readPin(host, sessionID, env) ?? latest
+    } catch {
+      fresh = latest
     }
+    if (fresh.model && target && !sameModel(fresh.model, target)) return
 
-    if (overflow) clearPin(host, sessionID, env)
-    writePin(
-      host,
-      sessionID,
-      {
-        ...latest,
-        ...(overflow ? { model: undefined, forced: false, redirect: null } : {}),
-        lastContextTokens: tokens,
-        lastOptimiser: optimiser,
-        compaction: compactionState,
-      },
-      env,
-    )
+    if (checkpointID) compactionState = { ...(compactionState ?? {}), checkpoint: checkpointID }
+    const requestedAt = fresh.compaction?.requestedAt ?? compactionState?.requestedAt
+    if (requestedAt) compactionState = { ...(compactionState ?? {}), requestedAt }
+
+    const clearStale =
+      overflow &&
+      !fresh.compaction?.requestedAt &&
+      (!fresh.model || sameModel(fresh.model, latest.model))
+    if (clearStale) clearPin(host, sessionID, env)
+
+    const next = {
+      ...fresh,
+      lastOptimiser: optimiser,
+      compaction: compactionState,
+      ...(clearStale ? { model: undefined, forced: false, redirect: null } : {}),
+    }
+    if (
+      !fresh.lastContextTokens ||
+      Number(fresh.lastContextTokens) === Number(latest.lastContextTokens)
+    ) {
+      next.lastContextTokens = tokens
+    }
+    writePin(host, sessionID, next, env)
   } catch {
     // A failed measurement or prune must never break a turn.
   }
@@ -240,22 +267,7 @@ export async function honorCompactRequest({ host, env, ctx, sessionID }) {
   try {
     const pin = readPin(host, sessionID, env) ?? {}
     if (!pin.compaction?.requestedAt) return
-    const requestedAt = Number(pin.compaction.requestedAt) || 0
-    // Keep the request time for summary-cost attribution, but never keep the
-    // request marker itself: a refused host must not be asked again.
-    writePin(
-      host,
-      sessionID,
-      {
-        ...pin,
-        compaction: {
-          ...pin.compaction,
-          requestedAt: undefined,
-          ...(requestedAt ? { lastRequestAt: requestedAt } : {}),
-        },
-      },
-      env,
-    )
+    writePin(host, sessionID, { ...pin, compaction: { ...pin.compaction, requestedAt: undefined } }, env)
     if (typeof ctx?.session?.compact === "function") {
       await ctx.session.compact({ sessionID })
     }

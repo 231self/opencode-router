@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { compactionRoi, contextDebt } from "../src/cost.js"
+import { compactionRoi, contextDebt, normaliseCost, tierAt } from "../src/cost.js"
 import { measureSessionContext } from "../src/tokens.js"
 
 import {
@@ -142,6 +142,43 @@ test("an immediate payback reports zero break-even turns", () => {
   expect(roi.invalidationCost).toBeLessThan(0)
   expect(roi.breakEvenTurns).toBe(0)
   expect(roi.worthIt).toBe(true)
+})
+
+test("negative savings are never worth it, even with a one-time credit", () => {
+  const roi = compactionRoi({
+    price: { input: 1, output: 0, cache: { read: 0.1, write: 0.05 } },
+    contextTokens: 10_000,
+    compactedTokens: 20_000,
+    cacheHitRatio: 0.8,
+    expectedTurns: 8,
+    rebuildCost: 0.015,
+  })
+  expect(roi.perTurnSavings).toBeLessThan(0)
+  expect(roi.worthIt).toBe(false)
+})
+
+test("a measured rebuild does not inherit the normal turn's output cost", () => {
+  const base = {
+    price: { input: 1, output: 2, cache: { read: 0.1, write: 1.25 } },
+    contextTokens: 100_000,
+    compactedTokens: 10_000,
+    cacheHitRatio: 0.8,
+    expectedTurns: 8,
+    rebuildCost: 0.05,
+  }
+  const withoutOutput = compactionRoi({ ...base, outputTokens: 0 })
+  const withOutput = compactionRoi({ ...base, outputTokens: 1000 })
+  expect(withOutput.invalidationCost).toBeCloseTo(withoutOutput.invalidationCost, 9)
+})
+
+test("tierAt picks the largest applicable context tier", () => {
+  const tiers = normaliseCost([
+    { input: 1, output: 2, cache: { read: 0.1, write: 1.25 } },
+    { tier: { size: 200_000 }, input: 2, output: 4, cache: { read: 0.2, write: 2.5 } },
+  ])
+  expect(tierAt(tiers, 100_000).input).toBe(1)
+  expect(tierAt(tiers, 250_000).input).toBe(2)
+  expect(tierAt([], 100_000)).toBeNull()
 })
 
 test("the measured cache state can supply the hit share", () => {

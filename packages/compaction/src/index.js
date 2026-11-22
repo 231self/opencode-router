@@ -65,13 +65,24 @@ export default {
             const data = event?.data ?? {}
             const at = Number(event?.created) || Date.now()
             if (event?.type === "session.step.started") {
-              usage.noteStepStart({ sessionID: data.sessionID, model: data.model, at })
+              usage.noteStepStart({
+                sessionID: data.sessionID,
+                model: data.model,
+                at,
+                assistantMessageID: data.assistantMessageID,
+              })
             } else if (event?.type === "session.step.ended") {
-              usage.noteStepEnd({ sessionID: data.sessionID, tokens: data.tokens, at })
+              usage.noteStepEnd({
+                sessionID: data.sessionID,
+                tokens: data.tokens,
+                at,
+                assistantMessageID: data.assistantMessageID,
+              })
             }
           }
-        } catch (cause) {
-          if (read().debug) console.error("[omlx-compaction] usage stream stopped:", String(cause?.message ?? cause))
+        } catch {
+          // Never stringify the exception: its payload may contain prompt text.
+          if (read().debug) console.error("[omlx-compaction] usage stream stopped")
         }
       })()
       disposers.push({ dispose: () => controller.abort() })

@@ -125,7 +125,7 @@ test("the router's persisted turns seed a restarted plugin", () => {
   const result = usage.ratioFor({ sessionID: "ses_1", model: CLAUDE, fallback: 0.8 })
   expect(result.ratio).toBeCloseTo(0.75, 9)
   expect(result.samples).toBe(1)
-  expect(result.source).toBe("measured")
+  expect(result.source).toBe("turn-log")
 })
 
 test("the first step after a checkpoint is captured as the rebuild", () => {
@@ -164,6 +164,30 @@ test("stepsSince returns only steps after the boundary", () => {
   const since = usage.stepsSince({ sessionID: "ses_1", model: CLAUDE, at: NOW })
   expect(since).toHaveLength(1)
   expect(since[0].tokens.input).toBe(10_001)
+})
+
+test("a step that started before the checkpoint is not the rebuild", () => {
+  const usage = new UsageTracker({ env: tempEnv(), now: () => NOW })
+  usage.noteStepStart({ sessionID: "ses_1", model: CLAUDE, at: NOW - 100 })
+  usage.markPendingRebuild({ sessionID: "ses_1", checkpoint: "cp-1", at: NOW })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 1_000, cache: { read: 4_000 } },
+    at: NOW + 1,
+  })
+  expect(usage.takeRebuild("ses_1")).toBeNull()
+})
+
+test("the rebuild carries the model that actually ran the step", () => {
+  const usage = new UsageTracker({ env: tempEnv(), now: () => NOW })
+  usage.markPendingRebuild({ sessionID: "ses_1", checkpoint: "cp-1", at: NOW })
+  usage.noteStepStart({ sessionID: "ses_1", model: CLAUDE, at: NOW + 1 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 1_000, cache: { read: 4_000 } },
+    at: NOW + 2,
+  })
+  expect(usage.takeRebuild("ses_1").model).toMatchObject(CLAUDE)
 })
 
 test("the window limits how far back the ratio looks", () => {

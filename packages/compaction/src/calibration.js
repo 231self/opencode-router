@@ -1,3 +1,4 @@
+import fs from "node:fs"
 import path from "node:path"
 
 import { readJson, stateRoot, writeJsonAtomic } from "@231self/opencode-shared/state.js"
@@ -40,6 +41,55 @@ export function readCalibration(env = process.env) {
 export function writeCalibration(value, env = process.env) {
   writeJsonAtomic(calibrationPath(env), value)
   return value
+}
+
+/**
+ * Read-modify-write under a small file lock. Two OpenCode processes can share
+ * the state root; an atomic rename prevents torn JSON but not lost updates.
+ * `mutate` receives the freshest document and returns the next one.
+ */
+export function updateCalibration(env = process.env, mutate = (value) => value) {
+  const file = calibrationPath(env)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const lock = `${file}.lock`
+  const wait = new Int32Array(new SharedArrayBuffer(4))
+  const deadline = Date.now() + 1_000
+  for (;;) {
+    let fd = null
+    try {
+      fd = fs.openSync(lock, "wx")
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error
+      if (Date.now() > deadline) {
+        try {
+          fs.unlinkSync(lock)
+        } catch {
+          // Another writer may have released it first.
+        }
+        continue
+      }
+      Atomics.wait(wait, 0, 0, 5)
+      continue
+    }
+    try {
+      const current = readCalibration(env)
+      const next = mutate(current) ?? current
+      next.at = Date.now()
+      writeJsonAtomic(file, next)
+      return next
+    } finally {
+      try {
+        fs.closeSync(fd)
+      } catch {
+        // Nothing useful to do; the lock file is removed next.
+      }
+      try {
+        fs.unlinkSync(lock)
+      } catch {
+        // A stale-lock cleanup may have removed it already.
+      }
+    }
+  }
 }
 
 /** `provider/id`, matching the router's turn and pin labels. */
@@ -126,7 +176,9 @@ export function recordObservation(calibration, { model, kind, value, at = Date.n
 export function bucketCost(price, buckets) {
   if (!price || !buckets) return 0
   const writePrice =
-    Number(price.cache?.write) > 0 ? Number(price.cache.write) : Number(price.input) || 0
+    price.cache?.write !== undefined
+      ? Number(price.cache.write) || 0
+      : Number(price.input) || 0
   return (
     ((Number(buckets.input) || 0) * (Number(price.input) || 0) +
       (Number(buckets.read) || 0) * (Number(price.cache?.read) || 0) +

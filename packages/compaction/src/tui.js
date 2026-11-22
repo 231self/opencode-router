@@ -51,11 +51,13 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   const source =
     cache.source === "measured"
       ? "measured"
-      : cache.source === "expired"
-        ? "expired (idle)"
-        : cache.source === "fallback"
-          ? "configured fallback"
-          : "none"
+      : cache.source === "turn-log"
+        ? "turn log"
+        : cache.source === "expired"
+          ? "expired (idle)"
+          : cache.source === "fallback"
+            ? "configured fallback"
+            : "none"
   const projections = Array.isArray(advisory.projections) ? advisory.projections : []
   const estimates = advisory.estimates ?? null
   return join(
@@ -173,7 +175,7 @@ async function runCommand(context, input) {
   }
 
   if (command !== "") {
-    await show(context, prose(`Unknown command: ${command}. Try /ctx help.`))
+    await show(context, prose(`Unknown command: ${String(command).slice(0, 40)}. Try /ctx help.`))
     return
   }
 

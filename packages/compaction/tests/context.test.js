@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { readPin, writePin } from "@231self/opencode-shared/state.js"
+import { clearPin, readPin, writePin } from "@231self/opencode-shared/state.js"
 
 import { readCalibration } from "../src/calibration.js"
 import { runContext } from "../src/context.js"
@@ -41,7 +41,7 @@ function tempEnv() {
   }
 }
 
-function harness({ core, env, usage = null }) {
+function harness({ core, env, usage = null, judge = null }) {
   const ctx = {
     model: { list: async () => MODELS },
     provider: { list: async () => [] },
@@ -50,7 +50,7 @@ function harness({ core, env, usage = null }) {
   }
   return {
     ctx,
-    run: (event) => runContext({ host: "opencode", env, ctx, config: {}, core, event, usage }),
+    run: (event) => runContext({ host: "opencode", env, ctx, config: {}, core, event, usage, judge }),
   }
 }
 
@@ -187,7 +187,14 @@ test("a compaction checkpoint calibrates summary size, request cost, and rebuild
     env,
   )
   const messages = [
-    { type: "compaction", status: "completed", id: "cp-1", summary: "parser state: ".concat("x".repeat(400)) },
+    {
+      type: "compaction",
+      status: "completed",
+      id: "cp-1",
+      summary: "parser state: ".concat("x".repeat(400)),
+      model: { providerID: "anthropic", id: "claude-opus-5-5" },
+      tokens: { input: 100_000, output: 800, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
     { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
   ]
   const event = { sessionID: "ses_1", model: MODELS[0], system: [], messages }
@@ -195,15 +202,22 @@ test("a compaction checkpoint calibrates summary size, request cost, and rebuild
 
   const pin = readPin("opencode", "ses_1", env)
   expect(pin.compaction.checkpoint).toBe("cp-1")
-  expect(pin.compaction.lastRequestAt).toBeUndefined()
   const entry = readCalibration(env).models["deepseek/deepseek-flash"]
   expect(entry.summary.samples).toBe(1)
   expect(entry.summary.value).toBeGreaterThan(100)
   expect(entry.lastPrediction.actual).toBe(5_000)
   expect(entry.lastPrediction.predicted).toBeGreaterThan(0)
-  expect(entry.request.samples).toBe(1)
-  expect(entry.request.value.output).toBe(800)
+  // The summary request belongs to the model that generated it, which may not
+  // be the model that resumes the session.
+  const requestEntry = readCalibration(env).models["anthropic/claude-opus-5-5"]
+  expect(requestEntry.request.samples).toBe(1)
+  expect(requestEntry.request.value.output).toBe(800)
   expect(entry.compactions).toBe(1)
+
+  // Clearing the routing pin must not make the same checkpoint count again.
+  clearPin("opencode", "ses_1", env)
+  await run(event)
+  expect(readCalibration(env).models["deepseek/deepseek-flash"].summary.samples).toBe(1)
 
   // The resumed turn reports its own usage; the next hook records it as the
   // rebuild cost once, not on every later turn.
@@ -221,6 +235,73 @@ test("a compaction checkpoint calibrates summary size, request cost, and rebuild
 
   await run(event)
   expect(readCalibration(env).models["deepseek/deepseek-flash"].rebuild.samples).toBe(1)
+})
+
+test("a delayed advisory cannot erase a newer request", async () => {
+  const env = tempEnv()
+  const judge = {
+    async chat() {
+      writePin(
+        "opencode",
+        "ses_1",
+        {
+          model: { providerID: "deepseek", id: "deepseek-flash" },
+          lastContextTokens: 30_000,
+          compaction: { requestedAt: 999 },
+        },
+        env,
+      )
+      return '{"action":"wait","confidence":0.9}'
+    },
+    getCached: () => undefined,
+    setCached: () => {},
+  }
+  const { run } = harness({ env, core: {}, judge })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 0 },
+    env,
+  )
+  const messages = [
+    { info: { role: "user" }, parts: [{ type: "text", text: "keep going ".concat("z".repeat(120000)) }] },
+    { info: { role: "assistant" }, parts: [{ type: "text", text: "working ".concat("w".repeat(120000)) }] },
+  ]
+  await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages })
+  const pin = readPin("opencode", "ses_1", env)
+  expect(pin.compaction.requestedAt).toBe(999)
+  // The newer measurement from the judge-time write is preserved too.
+  expect(pin.lastContextTokens).toBe(30_000)
+})
+
+test("a model decision that lands during the advisory is not overwritten", async () => {
+  const env = tempEnv()
+  const judge = {
+    async chat() {
+      writePin(
+        "opencode",
+        "ses_1",
+        { model: { providerID: "deepseek", id: "deepseek-v4-pro" }, lastContextTokens: 30_000 },
+        env,
+      )
+      return '{"action":"wait","confidence":0.9}'
+    },
+    getCached: () => undefined,
+    setCached: () => {},
+  }
+  const { run } = harness({ env, core: {}, judge })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 0 },
+    env,
+  )
+  const messages = [
+    { info: { role: "user" }, parts: [{ type: "text", text: "keep going ".concat("z".repeat(120000)) }] },
+    { info: { role: "assistant" }, parts: [{ type: "text", text: "working ".concat("w".repeat(120000)) }] },
+  ]
+  await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages })
+  expect(readPin("opencode", "ses_1", env).model.id).toBe("deepseek-v4-pro")
 })
 
 test("a context write cannot clobber a newer routing pin", async () => {

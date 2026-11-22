@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { cacheHitShare } from "../src/tokens.js"
+import { cacheHitShare, countContextTokens, estimateTokens } from "../src/tokens.js"
 
 import { RECORDED_PRICES as PRICES, RECORDED_TURN as TURN } from "./fixtures.js"
 
@@ -26,4 +26,20 @@ test("a turn without cache activity has no share", () => {
 
 test("the share is capped at 1", () => {
   expect(cacheHitShare({ input: 0, output: 0, cache: { read: 50, write: 0 } })).toBe(1)
+})
+
+test("a completed compaction checkpoint counts its summary", () => {
+  const summary = "parser state ".repeat(200)
+  const plain = countContextTokens({
+    system: [],
+    messages: [{ info: { role: "user" }, parts: [{ type: "text", text: "continue" }] }],
+  })
+  const compacted = countContextTokens({
+    system: [],
+    messages: [
+      { type: "compaction", status: "completed", id: "cp-1", summary },
+      { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
+    ],
+  })
+  expect(compacted - plain).toBe(estimateTokens(summary) + 16)
 })

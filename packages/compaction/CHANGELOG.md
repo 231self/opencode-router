@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-11-22
 
 ### Added
 
@@ -20,8 +20,35 @@
   measured, estimated, or modelled.
 - Each compaction also records the size the plugin predicted against the size
   the host actually sent. `/ctx` shows the last prediction and the mean
-  absolute error; `bun run compaction:report` prints the same calibration for
-  every model without a live session.
+  absolute percentage error; `bun run compaction:report` prints the same
+  calibration for every model without a live session.
+
+### Fixed
+
+- The summary request's cost now comes from the completed checkpoint's own
+  `tokens` and `model`, which OpenCode supplies for manual, automatic, and
+  native compactions. Timestamp-based attribution of ordinary model steps is
+  gone, so a slow turn can no longer be billed as compaction.
+- A compaction checkpoint's summary is counted in the prefill by both the
+  fallback token counter and the optimiser, so the compacted size and the
+  predicted size use the same definition.
+- Rebuild capture pairs by assistant-message id and start time, ignores steps
+  that started before the checkpoint, and records the model that actually ran
+  the step.
+- A delayed advisory re-reads the pin before writing, preserving a newer
+  routing decision, request marker, or context measurement.
+- Calibration updates take a cross-process lock, and checkpoint deduplication
+  lives in the calibration artifact rather than the routing pin, which
+  `clearPin` removes.
+- Prices are resolved per token count (`tierAt`), so a long-context tier is
+  applied to the context that crosses it rather than to every number. An
+  explicit zero cache-write price is no longer replaced by the input price.
+- The economics veto runs after the guard, so a held `compact-now` cannot
+  survive an unprofitable estimate. Horizons use net payback for `worth it`.
+- The usage stream's debug path logs a fixed message instead of stringifying
+  an exception that may carry prompt text.
+- The `/ctx` popup test enforces 72 columns, and an unknown command is clipped
+  before it reaches the popup.
 
 ## 0.1.1 — 2026-11-22
 

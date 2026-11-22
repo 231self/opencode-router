@@ -78,6 +78,25 @@ test("a blocked change reports the standing verdict", () => {
   expect(advisory.source).toBe("guard")
 })
 
+test("the economics veto applies after the guard, including a held compact-now", () => {
+  const held = composeAdvisory({
+    structural: COMPACT,
+    roi: ROI_NOT_WORTH,
+    guard: { verdict: "compact-now", turns: 10, changedTurns: 10 },
+  })
+  // The guard allows the standing verdict, then the veto removes it.
+  expect(held.verdict).toBe("not-yet")
+  expect(held.source).toBe("economics")
+
+  const restored = composeAdvisory({
+    structural: { verdict: "not-yet", confidence: 0.7, signals: {} },
+    roi: ROI_NOT_WORTH,
+    guard: { verdict: "compact-now", turns: 10, changedTurns: 8 },
+  })
+  expect(restored.verdict).toBe("not-yet")
+  expect(restored.source).toBe("guard+economics")
+})
+
 test("horizons are sorted, deduped, and bounded", () => {
   expect(normaliseHorizons(undefined)).toEqual(DEFAULT_HORIZONS)
   expect(normaliseHorizons([15, 3, 8, 8, 0, -1, 500])).toEqual([3, 8, 15])
