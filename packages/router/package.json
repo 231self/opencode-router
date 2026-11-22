@@ -1,6 +1,6 @@
 {
   "name": "@231self/opencode-router",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Per-turn model routing for OpenCode V2 and Kilo, decided by a small local judge (oMLX, llama.cpp, or any OpenAI-compatible server), with a WASM routing core. The context optimiser ships in @231self/opencode-compaction.",
   "type": "module",
   "license": "Apache-2.0",

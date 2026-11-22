@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 — 2026-11-22
+
+### Changed
+
+- Documentation only. The benchmark reports were regenerated with the 0.3.0
+  per-turn context projection: long-session `balanced` now lands near
+  always-frontier while `switch` stays 38% cheaper, so the earlier
+  cost-neutral claim is superseded. The README's doc links, which resolved
+  inside the package after the split, now use absolute repository URLs.
+
 ## 0.3.0 — 2026-11-22
 
 ### Changed

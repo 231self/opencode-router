@@ -15,7 +15,7 @@ a model that will fail it.
 
 </div>
 
-> **Status: v0.3.0.** Routing, subagent policy, the TUI `/router` surface,
+> **Status: v0.3.1.** Routing, subagent policy, the TUI `/router` surface,
 > per-turn timing, the CLI, and the Kilo shim are implemented and tested. The
 > context optimiser moved to
 > [`@231self/opencode-compaction`](https://www.npmjs.com/package/@231self/opencode-compaction)
