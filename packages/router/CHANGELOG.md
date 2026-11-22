@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0 — 2026-11-22
+
+### Changed
+
+- **Breaking:** the context optimiser moved to
+  [`@231self/opencode-compaction`](https://www.npmjs.com/package/@231self/opencode-compaction).
+  The router is model selection only, and the `route` ABI no longer carries
+  `optimise`. Install the compaction plugin to keep pruning oversized tool
+  output.
+- Pricing, measurement, the oMLX judge client, the config and state adapters,
+  the Kilo shim, and popup layout now come from
+  `@231self/opencode-shared`; the router imports them and keeps no copies.
+- The switch decision prices candidates over the pin horizon instead of one
+  turn. Every turn is priced at the context it actually reaches: a
+  long-context price tier applies from the turn that crosses it, and a model
+  that outgrows its window is charged the cache-invalidation premium where the
+  overflow happens, then continues from the compacted size.
+
+### Fixed
+
+- Long-context price tiers (`context_over_200k`-style catalog entries) were
+  silently unpriced in scoring: a non-tiered base entry blocked every tiered
+  entry that followed it in catalog order, so the high tier never applied.
+
 ## 0.2.8 — 2026-11-21
 
 ### Changed

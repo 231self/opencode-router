@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — 2026-11-21
+## 0.1.0 — 2026-11-22
 
 ### Added
 
@@ -18,3 +18,10 @@
   break-even turns, `worthIt`) — validated against a recorded turn whose cost
   reconciles exactly to $0.028712 and a recorded compaction-checkpoint
   session.
+- The oMLX judge client (`judge-client.js`): model discovery, JSON-only chat
+  with one repair round, an LRU cache, timeouts, and offline `extractJson`.
+  Both plugins supply their own system message and validate their own verdict
+  shape.
+- Model-reference helpers (`refs.js`), the Kilo shim (`kilo.js`), and the
+  labelled, aligned popup formatter (`format.js`) used by the router TUI, the
+  CLI, and Kilo.
