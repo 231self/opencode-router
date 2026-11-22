@@ -1,7 +1,7 @@
 import os from "node:os"
 
 import { readConfig } from "@231self/opencode-shared/config.js"
-import { facts, join, plural, section } from "./format.js"
+import { facts, join, plural, section } from "@231self/opencode-shared/format.js"
 import {
   hostStateDir,
   listPins,

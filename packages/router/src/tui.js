@@ -1,5 +1,5 @@
 import { configPath, formatWeights, readConfig, resolvePolicyWeights, saveConfig } from "@231self/opencode-shared/config.js"
-import { facts, join, note, plural, prose, section } from "./format.js"
+import { facts, join, note, plural, prose, section } from "@231self/opencode-shared/format.js"
 import { Judge } from "./judge.js"
 import {
   Provisioner,

@@ -3,8 +3,8 @@ import os from "node:os"
 import path from "node:path"
 
 import { resolveSecret } from "@231self/opencode-shared/config.js"
-import { facts, join, prose } from "./format.js"
-import { paramBillions } from "./judge.js"
+import { facts, join, prose } from "@231self/opencode-shared/format.js"
+import { paramBillions } from "@231self/opencode-shared/judge-client.js"
 
 export const DEFAULT_JUDGE_REPO = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 

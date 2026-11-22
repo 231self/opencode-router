@@ -287,6 +287,9 @@ regression tests and release notes.
    `contextDebt` (projected next-turn cost at current vs compacted context).
 5. **Tolerance + paper** — per-pin compaction tolerance bench, ablation runs,
    paper draft.
+6. **Documentation pass** — the final stage: rewrite the user-facing docs to
+   the standard in AGENTS.md (plain, direct, concrete, no AI jargon), tested
+   commands only, human-readable first.
 
 ## 12. Risks and open questions
 

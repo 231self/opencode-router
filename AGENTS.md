@@ -86,3 +86,15 @@ The design of record is
 program's design and plans live in `docs/superpowers/`. The READMEs are the
 user-facing contract and must stay in sync with behaviour. Update them when
 behaviour changes.
+
+Documentation is written for people. The program's final stage is a
+documentation pass held to this standard:
+
+- Plain, direct sentences; concrete examples over abstractions; every shown
+  command must actually run.
+- No AI-office-speak: no "leverage", "seam", "robust", "seamless", "delve",
+  "landscape", no "it's not X, it's Y" constructions, no hedging stacks, no
+  decorative bullet walls where prose reads better.
+- Explain why things are as they are — the same voice as the code comments.
+- A cold reader can install and understand the router in five minutes;
+  deeper material stays precise and skimmable.

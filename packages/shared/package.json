@@ -20,7 +20,9 @@
     "./config.js": "./src/config.js",
     "./state.js": "./src/state.js",
     "./kilo.js": "./src/kilo.js",
-    "./refs.js": "./src/refs.js"
+    "./refs.js": "./src/refs.js",
+    "./format.js": "./src/format.js",
+    "./judge-client.js": "./src/judge-client.js"
   },
   "files": [
     "src",

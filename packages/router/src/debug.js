@@ -1,7 +1,7 @@
 import os from "node:os"
 
 import { readConfig } from "@231self/opencode-shared/config.js"
-import { facts, join, section } from "./format.js"
+import { facts, join, section } from "@231self/opencode-shared/format.js"
 import { judgeAvailability } from "./provision.js"
 import { qualityCacheAgeMs, qualitySource, readQualityCache } from "./quality.js"
 import { readDecisions, readTurns, summariseTurns } from "@231self/opencode-shared/state.js"
