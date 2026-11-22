@@ -49,7 +49,9 @@ bun run security       # secret scan of the tree and every published tarball
 
 Live-only checks (need oMLX and provider keys): `bun run test:e2e`,
 `bun run test:e2e:live`, `bun run judge:calibrate --repeat 3` (writes the
-verdict-noise band), `bun run routing:eval`, `bun run quality:eval`.
+verdict-noise band), `bun run compaction:calibrate --repeat 3` (writes the
+compaction-verdict instability band), `bun run routing:eval`,
+`bun run quality:eval`.
 
 ## Releasing
 
