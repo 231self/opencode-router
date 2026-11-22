@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/231self/opencode-router.git",
-    "directory": "packages/econ"
+    "directory": "packages/shared"
   },
   "homepage": "https://github.com/231self/opencode-router#readme",
   "bugs": {
