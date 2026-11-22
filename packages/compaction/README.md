@@ -57,17 +57,27 @@ compact this session; the request clears itself even if the host refuses.
 
 In `~/.config/omlx-router/config.json`:
 
-```jsonc
+```json
 {
   "compaction": {
-    "enabled": true,        // false turns the advisory off
-    "expectedTurns": 8,     // horizon for "does compaction pay?"
-    "baseCooldown": 3,      // turns a verdict change must wait
-    "judgeRefine": true,    // let the judge resolve unclear cases
-    "summaryTokens": 1200   // assumed size of a compaction summary
+    "enabled": true,
+    "expectedTurns": 8,
+    "baseCooldown": 3,
+    "judgeRefine": true,
+    "summaryTokens": 1200
   }
 }
 ```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | `false` turns the advisory off. |
+| `expectedTurns` | `8` | Horizon for "does compaction pay?" |
+| `baseCooldown` | `3` | Turns a verdict change must wait. |
+| `judgeRefine` | `true` | Let the judge resolve unclear cases. |
+| `summaryTokens` | `1200` | Assumed size of a compaction summary. |
+
+The file is read as strict JSON, so keep comments out of it.
 
 ## Calibration
 
@@ -81,12 +91,19 @@ bun run compaction:calibrate --repeat 3
 This writes `~/.local/state/omlx-router/compaction-noise.json`. It needs the
 local judge running (the same oMLX endpoint the router uses).
 
-Two other live tools, for the research side:
+Two other research tools:
 
 ```sh
-bun run compaction:ablation           # fixed-threshold vs signal vs hybrid, on fixtures
-bun run tolerance:eval                # per-model degradation under compaction
+bun run compaction:ablation --repeat 3              # fixed vs signal vs hybrid, on fixtures
+bun run tolerance:eval --repeat 2 --model my-model  # per-model degradation under compaction
 ```
+
+The ablation is offline by default; add `--judge` to use the live oMLX judge.
+The signal and hybrid arms run the shipped advisory, including the economics
+veto and the cooldown. Repeats are real samples. The tolerance bench scores
+each model with its full context and with a compacted checkpoint; a
+deliberately lossy control task is reported separately so a model is not
+punished for refusing to answer from missing evidence.
 
 ## Privacy
 

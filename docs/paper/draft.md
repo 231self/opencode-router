@@ -26,15 +26,19 @@ in context.
 ## 1. The cost of a turn on cache-billed APIs
 
 Provider usage for one turn is three token buckets: `input` (cache misses),
-`cache.read` (hits), and `cache.write` (newly cached). The recorded cost of
-a turn is
+`cache.read` (hits), and `cache.write` (newly cached). All prices are per
+million tokens, so the recorded cost of a turn is
 
-    cost = input × pin + read × pread + (output + reasoning) × pout.
+    cost = (input × pin + read × pread + write × pwrite
+            + (output + reasoning) × pout) / 1M.
 
-We verified this identity against a recorded deepseek/deepseek-v4-pro turn:
-39,357 misses at $0.66/M, 44,928 hits at $0.022/M, 883 output tokens at
-$1.98/M — $0.028712 to the cent, and `input` is *not* the total prompt (hits
-exceed it). Two consequences follow.
+We verified this identity against a recorded deepseek/deepseek-v4-pro turn
+with no cache writes: 39,357 misses at $0.66/M, 44,928 hits at $0.022/M, and
+883 output tokens at $1.98/M give $0.028712 to the cent, and `input` is *not*
+the total prompt (hits exceed it). That turn validates the read side of the
+identity; the write term is exercised by the premium below, and needs a
+recorded turn with `cache.write > 0` before the full identity is confirmed.
+Two consequences follow.
 
 **The prefix is re-paid every turn, cheaply.** The accumulated context of an
 agent session is billed each turn, mostly as cache reads. We call the
@@ -112,11 +116,13 @@ The system is two OpenCode plugins: a model router and a context manager,
 sharing a pricing library. Two integration points are worth noting.
 
 **Context debt enters the switch decision.** The router compares models on
-projected cost over the pin horizon, not one turn: input is priced at the
-tier the model will actually be paying once the context has grown, and a
-model whose window cannot hold the projection is charged the compaction
-premium — the better of keeping and compacting is each model's projected
-price. Building this exposed a bug in the incumbent's own cost code:
+projected cost over the pin horizon, not one turn. Each turn is priced at the
+context it actually reaches, so a long-context tier only applies from the
+turn that crosses it, and a model that overflows its window keeps its served
+turns at full price, then pays the compaction premium and continues from the
+smaller context. Charging the final tier retroactively, or pricing every turn
+at the compacted size, made a late overflow look free and could reverse the
+ranking. Building this also exposed a bug in the incumbent's own cost code:
 long-context price tiers (the `context_over_200k` class of catalog entries)
 were silently unpriced in scoring because a non-tiered base entry blocked
 them in catalog order.
@@ -129,19 +135,22 @@ flipped on a score gap smaller than the judge can distinguish.
 
 ## 5. Preliminary measurements
 
-- Cost-model validation: the recorded turn reconciles to $0.028712 exactly,
-  through both the bucket identity and the ratio model at the measured hit
-  share (h = 44,928 / 84,285).
+- Cost-model validation: the recorded turn (no cache writes) reconciles to
+  $0.028712 exactly, through both the bucket identity and the ratio model at
+  the measured hit share (h = 44,928 / 84,285).
 - Judge economics on real sessions: consulted on 36% of turns (132 of 207
   decisions resolved without it: 50 pin-kept, 38 forced, 38 heuristic);
   fresh verdicts average 1,216 ms, p95 1,509 ms.
 - Compaction-verdict calibration: instability 0 across re-sampled verdicts;
   median verdict latency 572–705 ms.
-- Strategy ablation on recorded-shaped trajectories (4 cases): fixed
-  threshold 2/4 (wrong mid-derivation and on the review case), deterministic
-  trigger 4/4, hybrid 4/4. The fixed baseline compacted 3× where the oracle
-  compacted once. [pending: same ablation over the long suite with the live
-  judge and recorded sessions]
+- Strategy ablation on recorded-shaped trajectories (4 cases, 3 samples
+  each): fixed threshold 6/12 (wrong mid-derivation and on the review case in
+  every sample), deterministic trigger 12/12, hybrid 12/12. The arms run the
+  production advisory, including the economics veto and the guard; only the
+  judge call is replaced offline. The fixed baseline compacted 9× where the
+  oracle compacted 3×. These are fixture-label verdicts, not task quality.
+  [pending: same ablation over the long suite with the live judge and
+  recorded sessions]
 - Per-model compaction tolerance: [pending — `tolerance:eval`; the SAC
   spread to expect is model-dependent degradation, flat for some models and
   several points for others]
@@ -149,14 +158,15 @@ flipped on a score gap smaller than the judge can distinguish.
 ## 6. Limitations
 
 The break-even model treats the compacted size as a configuration estimate
-(summary size plus the recent tail) rather than a measured value; sessions
-that compact repeatedly are modelled as one compaction within the horizon;
-and the growth projection assumes the current prompt is representative. All
-three are conservative in the direction that matters: they can understate
-how soon compaction pays, never overstate it. The verdict layer's
-generalization rests on a four-case calibration and a small local judge;
-the artifact mechanism (calibrate, store, respect the band) is the claim,
-not any single verdict.
+(summary size plus the recent tail) rather than a measured value; the JS
+advisory models repeated compaction within a horizon as one compaction; and
+the growth projection assumes the current prompt is representative. The
+direction of the error is mixed rather than one-sided: a summary larger than
+the estimate understates the premium and makes compaction look cheaper, while
+a prompt busier than average overstates growth and makes it look dearer. The
+verdict layer's generalization rests on a four-case calibration and a small
+local judge; the artifact mechanism (calibrate, store, respect the band) is
+the claim, not any single verdict.
 
 ## References (working)
 

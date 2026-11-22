@@ -45,19 +45,67 @@ export function degradation(intact, compacted) {
 }
 
 /**
+ * Split a `provider/model` pool label at the first slash. Model ids may
+ * contain slashes (`openrouter/meta-llama/llama-3.1-70b`), so splitting on
+ * every slash would silently attribute results to the wrong model.
+ * Labels without a provider return null; the caller decides the fallback.
+ */
+export function parseModelLabel(label) {
+  const text = String(label ?? "").trim()
+  const slash = text.indexOf("/")
+  if (slash <= 0 || slash === text.length - 1) return null
+  return { providerID: text.slice(0, slash), id: text.slice(slash + 1) }
+}
+
+/**
+ * Judge settings for a run: the configured endpoint by default, or an
+ * explicit override. Credentials stay with the origin they were configured
+ * for; an override to a different origin never receives the configured key.
+ */
+export function judgeTarget({ configured = {}, overrideURL = null } = {}) {
+  const fallback = "http://127.0.0.1:1234/v1"
+  const baseURL = overrideURL ?? configured.baseURL ?? fallback
+  const sameOrigin = originOf(baseURL) === originOf(configured.baseURL ?? fallback)
+  return { ...configured, baseURL, ...(sameOrigin ? {} : { apiKey: undefined }) }
+}
+
+function originOf(value) {
+  try {
+    return new URL(String(value)).origin
+  } catch {
+    return String(value)
+  }
+}
+
+/**
  * Fold task pairs into one tolerance record per model:
- * `{ model: { degradation, tasks, intact, compacted } }`, sorted worst
- * first when listed. `results` are `{ model, task, intact, compacted }`.
+ * `{ model: { degradation, tasks, intact, compacted, invalid } }`, sorted
+ * worst first when listed. `results` are
+ * `{ model, task, intact, compacted, control? }`.
+ *
+ * Unparseable grader output arrives as `null` (never as a genuine zero) and
+ * is counted as `invalid` instead of being averaged into the score. Control
+ * rows deliberately drop evidence from the compacted prompt; they are
+ * reported by the runner but excluded here, because their scores measure
+ * hallucination under missing information, not compaction tolerance.
  */
 export function summariseTolerance(results) {
   const byModel = new Map()
   for (const result of results ?? []) {
+    if (result?.control) continue
     const model = String(result?.model ?? "unknown")
-    const entry = byModel.get(model) ?? { model, tasks: 0, intact: 0, compacted: 0, degradation: 0 }
-    entry.tasks += 1
-    entry.intact += Number(result.intact) || 0
-    entry.compacted += Number(result.compacted) || 0
+    const entry =
+      byModel.get(model) ?? { model, tasks: 0, intact: 0, compacted: 0, degradation: 0, invalid: 0 }
+    const intact = result?.intact == null ? null : Number(result.intact)
+    const compacted = result?.compacted == null ? null : Number(result.compacted)
     byModel.set(model, entry)
+    if (!Number.isFinite(intact) || !Number.isFinite(compacted)) {
+      entry.invalid += 1
+      continue
+    }
+    entry.tasks += 1
+    entry.intact += intact
+    entry.compacted += compacted
   }
   for (const entry of byModel.values()) {
     entry.degradation = degradation(entry.intact, entry.compacted)

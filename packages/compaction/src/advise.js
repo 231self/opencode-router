@@ -12,6 +12,10 @@ export { guardAllows }
  * compaction economics, held steady by the flip-flop guard. Pure except for
  * the judge call (pass `judge: null` for the deterministic-only path).
  *
+ * `refine` replaces the judge call with another refiner (the ablation harness
+ * uses it to play the judge offline); without it, a `judge` client drives
+ * `refineVerdict` as usual.
+ *
  * The compacted size estimate is the configured summary size plus the recent
  * tail (`summaryTokens` defaults to 1,200 — typical checkpoint summaries are
  * small; the tail is what survives a compaction untouched).
@@ -24,15 +28,18 @@ export async function advise({
   previousTokens = 0,
   guard = null,
   judge = null,
+  refine = null,
   noise = null,
 }) {
   const settings = config?.compaction ?? {}
   const structural = scoreSignals(extractSignals({ messages, measuredTokens, previousTokens }), settings)
 
   let refined = null
-  if (structural.verdict === "uncertain" && settings.judgeRefine !== false && judge) {
-    refined = await refineVerdict({
-      judge,
+  const refiner =
+    refine ??
+    (judge ? (input) => refineVerdict({ judge, ...input }) : null)
+  if (structural.verdict === "uncertain" && settings.judgeRefine !== false && refiner) {
+    refined = await refiner({
       promptText: lastUserText(messages),
       tailDigest: tailDigest(messages),
       signals: structural.signals,

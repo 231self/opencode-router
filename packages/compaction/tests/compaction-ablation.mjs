@@ -126,22 +126,27 @@ async function main() {
       })()
     : async ({ signals }) => (signals.boundary ? { action: "compact", confidence: 1 } : { action: "wait", confidence: 1 })
 
-  const { rows, summary } = await runAblation({ cases: CASES, refine })
+  const mode = options.judge ? "live-judge" : "offline"
+  const { rows, summary } = await runAblation({ cases: CASES, refine, samples: options.repeat })
 
   if (options.json) {
-    console.log(JSON.stringify({ mode: options.judge ? "live-judge" : "offline", rows, summary }, null, 2))
+    console.log(JSON.stringify({ mode, samples: options.repeat, rows, summary }, null, 2))
     return 0
   }
+  const showSample = options.repeat > 1
   for (const row of rows) {
     console.log(
       `${row.correct ? "ok  " : "MISS"} ${row.strategy.padEnd(6)} ${row.case.padEnd(24)} ` +
+        `${showSample ? `#${row.sample + 1} ` : ""}` +
         `${row.verdict.padEnd(12)} oracle=${row.oracle.padEnd(12)} source=${row.source}`,
     )
   }
   console.log("")
   for (const entry of summary) {
     console.log(
-      `${entry.strategy.padEnd(6)} correct ${entry.correct}/${entry.cases} · compacted ${entry.compactions} · delegated ${entry.delegates}`,
+      `${entry.strategy.padEnd(6)} correct ${entry.correct}/${entry.samples} ` +
+        `(${entry.cases} cases × ${options.repeat}) · compacted ${entry.compactions} · ` +
+        `delegated ${entry.delegates}`,
     )
   }
   return 0
