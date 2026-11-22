@@ -128,6 +128,44 @@ test("the router's persisted turns seed a restarted plugin", () => {
   expect(result.source).toBe("measured")
 })
 
+test("the first step after a checkpoint is captured as the rebuild", () => {
+  const usage = new UsageTracker({ env: tempEnv(), now: () => NOW })
+  usage.markPendingRebuild({ sessionID: "ses_1", checkpoint: "cp-1", at: NOW })
+  usage.noteStepStart({ sessionID: "ses_1", model: CLAUDE, at: NOW + 1 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 1_000, output: 200, cache: { read: 4_000, write: 900 } },
+    at: NOW + 2,
+  })
+  // A later step is not the rebuild.
+  usage.noteStepStart({ sessionID: "ses_1", model: CLAUDE, at: NOW + 3 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 100, cache: { read: 5_000 } },
+    at: NOW + 4,
+  })
+
+  const rebuild = usage.takeRebuild("ses_1")
+  expect(rebuild.checkpoint).toBe("cp-1")
+  expect(rebuild.tokens).toEqual({ input: 1_000, read: 4_000, write: 900, output: 200 })
+  expect(usage.takeRebuild("ses_1")).toBeNull()
+})
+
+test("stepsSince returns only steps after the boundary", () => {
+  const usage = new UsageTracker({ env: tempEnv(), now: () => NOW })
+  for (const [index, at] of [NOW - 5_000, NOW + 1_000].entries()) {
+    usage.noteStepStart({ sessionID: "ses_1", model: CLAUDE, at })
+    usage.noteStepEnd({
+      sessionID: "ses_1",
+      tokens: { input: 10_000 + index, cache: { read: 10_000 } },
+      at,
+    })
+  }
+  const since = usage.stepsSince({ sessionID: "ses_1", model: CLAUDE, at: NOW })
+  expect(since).toHaveLength(1)
+  expect(since[0].tokens.input).toBe(10_001)
+})
+
 test("the window limits how far back the ratio looks", () => {
   const usage = new UsageTracker({ env: tempEnv(), now: () => NOW })
   const steps = [

@@ -12,6 +12,12 @@
   measurement. `/ctx` shows the rate, source, and sample count.
 - `/ctx` shows the same economics at 3, 8, and 15 turns (`horizons`), not just
   at the decision horizon.
+- Real compactions calibrate the estimate. The post-compaction context size
+  replaces the assumed summary size; the first post-compaction turn's reported
+  usage replaces the modelled rebuild cost; the summary request is measured
+  when an explicit `/ctx here` marks its boundary. Observations are stored per
+  model in `compaction-calibration.json`, and `/ctx` labels each number
+  measured, estimated, or modelled.
 
 ## 0.1.1 — 2026-11-22
 

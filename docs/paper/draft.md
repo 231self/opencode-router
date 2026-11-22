@@ -69,6 +69,12 @@ where re-warming a cache is free. On real cache-billed pricing the savings
 net against the premium, and the break-even is computable per session from
 data the host already has.
 
+The implemented estimate adds the summary request itself — it reads the
+pre-compaction context and writes the summary — and, after the first
+compaction, replaces the modelled rebuild term with the next turn's reported
+cache reads, writes, and misses. The compacted size is calibrated from the
+context the host actually sends, not only from the configured summary length.
+
 ## 2. When to compact is a structural question
 
 Fixed token thresholds pay "no heed to trajectory structure" and discard
@@ -164,16 +170,18 @@ The break-even model treats the compacted size as a configuration estimate
 (summary size plus the recent tail) rather than a measured value; the JS
 advisory models repeated compaction within a horizon as one compaction; and
 the growth projection assumes the current prompt is representative. The cache
-hit rate is no longer assumed: the advisory uses provider-reported usage over
-recent steps, with idle expiry for providers whose cache lifetime is known.
-The remaining estimate is the compacted size, and the next measurement is what
-the host actually spends to summarize and rebuild the context. The direction
-of the error is mixed rather than one-sided: a summary larger than the
-estimate understates the premium and makes compaction look cheaper, while a
-prompt busier than average overstates growth and makes it look dearer. The
-verdict layer's generalization rests on a four-case calibration and a small
-local judge; the artifact mechanism (calibrate, store, respect the band) is
-the claim, not any single verdict.
+hit rate is measured from provider-reported usage over recent steps, with
+idle expiry for providers whose cache lifetime is known. The compacted size is
+now calibrated from observed checkpoints, and the rebuild cost comes from the
+first post-compaction turn when the host reports it. The summary request is
+still estimated unless an explicit request marks its boundary; a native
+compaction cannot be attributed that way. The direction of the error is mixed
+rather than one-sided: a summary larger than the estimate understates the
+premium and makes compaction look cheaper, while a prompt busier than average
+overstates growth and makes it look dearer. The verdict layer's generalization
+rests on a four-case calibration and a small local judge; the artifact
+mechanism (calibrate, store, respect the band) is the claim, not any single
+verdict.
 
 ## References (working)
 

@@ -108,6 +108,28 @@ test("compaction never pays when the savings vanish and the write is dear", () =
   expect(roi.worthIt).toBe(false)
 })
 
+test("summary generation and a measured rebuild enter the premium", () => {
+  const price = { input: 1, output: 2, cache: { read: 0.1, write: 1.25 } }
+  const base = {
+    price,
+    contextTokens: 100_000,
+    compactedTokens: 10_000,
+    cacheHitRatio: 0.8,
+    expectedTurns: 8,
+  }
+  const plain = compactionRoi(base)
+  const withSummary = compactionRoi({ ...base, summaryCost: 0.01 })
+  expect(withSummary.summaryCost).toBe(0.01)
+  expect(withSummary.invalidationCost).toBeCloseTo(plain.invalidationCost + 0.01, 9)
+
+  // Steady compacted turn = 10,000 × 0.28 / 1M. A measured rebuild of $0.05
+  // replaces the modelled first-turn premium.
+  const measured = compactionRoi({ ...base, rebuildCost: 0.05, summaryCost: 0.01 })
+  expect(measured.rebuildCost).toBe(0.05)
+  expect(measured.invalidationCost).toBeCloseTo(0.05 - 0.0028 + 0.01, 9)
+  expect(measured.breakEvenTurns).toBe(3)
+})
+
 test("an immediate payback reports zero break-even turns", () => {
   const price = { input: 1, output: 0, cache: { read: 0.1, write: 0.05 } }
   const roi = compactionRoi({

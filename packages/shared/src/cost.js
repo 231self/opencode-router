@@ -272,10 +272,12 @@ export function contextDebt({
  *
  * - `perTurnSavings` = modelled turn cost at `contextTokens` minus the same
  *   turn at `compactedTokens`: compaction removes the prefix re-payment.
- * - `invalidationCost` = the one-time cache-invalidation premium: the first
- *   post-compaction turn writes the whole compacted prefill at `cache.write`
- *   (falling back to the input price where writes are not billed separately),
- *   against what a steady compacted turn costs once cached.
+ * - `invalidationCost` = the one-time premium: the summary request plus the
+ *   first post-compaction turn's input-side rebuild cost, against a steady
+ *   compacted turn. `rebuildCost` overrides the modelled rebuild when the
+ *   host reported it; `summaryCost` is added either way. Output tokens are
+ *   excluded from the rebuild side because they are a normal turn cost, not
+ *   a compaction cost.
  * - `breakEvenTurns` = `ceil(invalidationCost / perTurnSavings)` — 0 when
  *   savings are immediate, `Infinity` when compaction never pays.
  * - `worthIt` = `breakEvenTurns <= expectedTurns`.
@@ -290,6 +292,8 @@ export function compactionRoi({
   cacheHitRatio,
   outputTokens = 0,
   expectedTurns = 0,
+  summaryCost = 0,
+  rebuildCost = null,
 }) {
   const context = count(contextTokens)
   const compacted = count(compactedTokens)
@@ -314,12 +318,22 @@ export function compactionRoi({
   const writePrice = tier?.cache?.write ?? tier?.input ?? 0
   const firstTurn =
     (compacted / 1_000_000) * writePrice + (output / 1_000_000) * (tier?.output ?? 0)
-  const invalidationCost = firstTurn - steady
+  const measuredRebuild = Number(rebuildCost)
+  const measured = rebuildCost != null && Number.isFinite(measuredRebuild) && measuredRebuild >= 0
+  const premium = measured ? measuredRebuild - steady : firstTurn - steady
+  const invalidationCost = premium + (Number(summaryCost) || 0)
   const breakEvenTurns =
     perTurnSavings > 0
       ? Math.ceil(Math.max(0, invalidationCost) / perTurnSavings)
       : invalidationCost <= 0
         ? 0
         : Infinity
-  return { perTurnSavings, invalidationCost, breakEvenTurns, worthIt: breakEvenTurns <= count(expectedTurns) }
+  return {
+    perTurnSavings,
+    invalidationCost,
+    breakEvenTurns,
+    worthIt: breakEvenTurns <= count(expectedTurns),
+    summaryCost: Number(summaryCost) || 0,
+    rebuildCost: measured ? measuredRebuild : null,
+  }
 }

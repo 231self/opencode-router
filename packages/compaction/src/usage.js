@@ -27,6 +27,7 @@ const MAX_STEPS = 20
 function tokensOf(value) {
   return {
     input: Number(value?.input) || 0,
+    output: Number(value?.output) || 0,
     read: Number(value?.cache?.read ?? value?.cache_read) || 0,
     write: Number(value?.cache?.write ?? value?.cache_write) || 0,
   }
@@ -82,7 +83,7 @@ export class UsageTracker {
     const key = String(sessionID)
     let state = this.sessions.get(key)
     if (!state) {
-      state = { steps: [], current: null }
+      state = { steps: [], current: null, pending: null, rebuild: null }
       this.sessions.set(key, state)
       if (this.sessions.size > MAX_SESSIONS) {
         const oldest = this.sessions.keys().next().value
@@ -104,13 +105,42 @@ export class UsageTracker {
     if (!sessionID) return
     const state = this.state(sessionID)
     const stamp = Number(at) || this.now()
+    const buckets = tokensOf(tokens)
     state.steps.push({
       at: stamp,
       model: state.current?.model ?? null,
-      tokens: tokensOf(tokens),
+      tokens: buckets,
     })
     if (state.steps.length > MAX_STEPS) state.steps.splice(0, state.steps.length - MAX_STEPS)
+    if (state.pending) {
+      // The first step after a checkpoint is the rebuild of the compacted
+      // prefix; the context hook that saw the checkpoint runs before it.
+      state.rebuild = { tokens: buckets, at: stamp, checkpoint: state.pending.checkpoint }
+      state.pending = null
+    }
     state.current = null
+  }
+
+  /** Mark the checkpoint whose next model step is the rebuild turn. */
+  markPendingRebuild({ sessionID, checkpoint = null, at } = {}) {
+    if (!sessionID) return
+    const state = this.state(sessionID)
+    state.pending = { checkpoint, at: Number(at) || this.now() }
+  }
+
+  /** The first post-compaction step, consumed once. */
+  takeRebuild(sessionID) {
+    if (!sessionID) return null
+    const state = this.state(sessionID)
+    const rebuild = state.rebuild ?? null
+    state.rebuild = null
+    return rebuild
+  }
+
+  /** Steps at or after `at`, for one session and model when given. */
+  stepsSince({ sessionID, model, at } = {}) {
+    const cutoff = Number(at) || 0
+    return this.stepsFor({ sessionID, model }).filter((step) => step.at >= cutoff)
   }
 
   /**

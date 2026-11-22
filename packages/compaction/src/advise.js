@@ -1,7 +1,8 @@
-import { compactionRoi, normaliseCost } from "@231self/opencode-shared/cost.js"
+import { compactionRoi, modelledTurnCost, normaliseCost } from "@231self/opencode-shared/cost.js"
 import { partTokens } from "@231self/opencode-shared/tokens.js"
 
 import { composeAdvisory, guardAllows, normaliseHorizons, projectHorizons } from "./advisory.js"
+import { bucketCost, calibrationFor } from "./calibration.js"
 import { refineVerdict } from "./refine.js"
 import { extractSignals, scoreSignals } from "./trigger.js"
 
@@ -30,6 +31,7 @@ export async function advise({
   judge = null,
   refine = null,
   cache = null,
+  calibration = null,
   noise = null,
 }) {
   const settings = config?.compaction ?? {}
@@ -53,15 +55,43 @@ export async function advise({
   // only when nothing has been observed.
   const tier = pricedTier(model)
   const ratio = cache?.ratio ?? (Number(config?.pin?.cacheHitRatio) || 0)
+  const calibrated = calibrationFor(calibration, model)
+  const measuredSummary = Number(calibrated?.summary?.value)
+  const summaryTokens =
+    Number.isFinite(measuredSummary) && measuredSummary > 0
+      ? measuredSummary
+      : Math.max(0, Number(settings.summaryTokens) || 0)
+  const compactedTokens = summaryTokens + tailTokens(messages)
+  const summaryMeasured = Number(calibrated?.summary?.samples) > 0
+  const requestMeasured = Number(calibrated?.request?.samples) > 0
+  const rebuildMeasured = Number(calibrated?.rebuild?.samples) > 0
+  let summaryCost = 0
+  if (tier) {
+    summaryCost = requestMeasured
+      ? bucketCost(tier, calibrated.request.value)
+      : modelledTurnCost({
+          price: tier,
+          inputTokens: measuredTokens,
+          prefixTokens: measuredTokens,
+          cacheHitRatio: ratio,
+          outputTokens: summaryTokens,
+        })
+  }
+  const rebuildCost =
+    tier && rebuildMeasured
+      ? bucketCost(tier, { ...calibrated.rebuild.value, output: 0 })
+      : null
   const roi = tier
     ? compactionRoi({
         price: tier,
         contextTokens: measuredTokens,
-        compactedTokens: compactedEstimate(messages, settings),
+        compactedTokens,
         cacheState: null,
         cacheHitRatio: ratio,
         outputTokens: 0,
         expectedTurns: Number(settings.expectedTurns) || 0,
+        summaryCost,
+        rebuildCost,
       })
     : null
   const horizons = normaliseHorizons(settings.horizons)
@@ -75,6 +105,14 @@ export async function advise({
     baseCooldown: Number(settings.baseCooldown) || 3,
     cache: cache ?? { ratio, samples: 0, source: "fallback" },
     projections: projectHorizons(roi, horizons),
+    estimates: {
+      summaryTokens,
+      summarySource: summaryMeasured ? "measured" : "assumed",
+      summaryCost,
+      summaryCostSource: requestMeasured ? "measured" : "estimated",
+      rebuildCost,
+      rebuildSource: rebuildMeasured ? "measured" : "modelled",
+    },
   })
   return { advisory, guard: nextGuard(guard, advisory) }
 }
@@ -100,13 +138,13 @@ function pricedTier(model) {
   return priced ? tier : null
 }
 
-function compactedEstimate(messages, settings) {
-  const summary = Math.max(0, Number(settings.summaryTokens) || 0)
-  const tail = messages.slice(-2).reduce((total, message) => {
+/** Tokens the host keeps untouched across a compaction: the recent tail. */
+export function tailTokens(messages) {
+  const plain = (messages ?? []).filter((message) => message?.type !== "compaction")
+  return plain.slice(-2).reduce((total, message) => {
     const parts = message?.parts ?? []
     return total + parts.reduce((sum, part) => sum + partTokens(part), 0)
   }, 0)
-  return summary + tail
 }
 
 function lastUserText(messages) {

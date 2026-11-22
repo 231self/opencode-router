@@ -72,6 +72,7 @@ export function composeAdvisory({
   baseCooldown = 3,
   cache = null,
   projections = [],
+  estimates = null,
 }) {
   let verdict = structural.verdict
   let confidence = structural.confidence
@@ -106,6 +107,7 @@ export function composeAdvisory({
     worthIt: roi?.worthIt ?? false,
     cache: cache ?? { ratio: 0, samples: 0, source: "none" },
     projections,
+    estimates: estimates ?? null,
     signals: structural.signals,
   }
 }

@@ -60,6 +60,14 @@ The decision horizon stays `expectedTurns`, but `/ctx` also shows the same
 economics at 3, 8, and 15 turns (`horizons`), so you can see where the answer
 flips instead of guessing when the session ends.
 
+The compacted size and the one-time cost are calibrated from real compactions.
+After each checkpoint the plugin compares its prediction with the context the
+host actually sent and uses the rolling observed size. The first
+post-compaction turn's reported reads, writes, and misses replace the modelled
+rebuild cost. The summary request is measured when an explicit `/ctx here`
+marks the boundary; otherwise its cost is estimated from the context it had to
+read and the summary it produced.
+
 **`/ctx`** in the TUI shows the current verdict with its numbers and what to
 do about it. **`/ctx here`** asks the host to compact this session; the
 request clears itself even if the host refuses. OpenCode already has its own
@@ -110,6 +118,11 @@ bun run compaction:calibrate --repeat 3
 This writes `~/.local/state/omlx-router/compaction-noise.json`. It needs the
 local judge running (the same oMLX endpoint the router uses).
 
+Real compactions update `~/.local/state/omlx-router/compaction-calibration.json`
+on their own. It stores the rolling summary size, the summary request's token
+buckets, and the first post-compaction turn's buckets per model. Delete it to
+return to the configured assumptions.
+
 Two other research tools:
 
 ```sh
@@ -126,13 +139,12 @@ punished for refusing to answer from missing evidence.
 
 ## Current limits
 
-The cache hit rate is measured from provider-reported usage when the host
-reports it; until then the configured fallback is used. The compacted size is
-still an estimate: `summaryTokens` plus the recent tail. The next improvement
-is to measure what OpenCode actually spends to summarize and rebuild the
-context, and to replace the assumed summary size with the observed
-post-compaction size. `/ctx` records the measured rate and its source so the
-difference stays visible.
+The cache hit rate is measured from provider-reported usage. The compacted
+size is calibrated from observed checkpoints, and the rebuild cost comes from
+the first post-compaction turn when the host reports it. The summary request is
+still estimated unless an explicit `/ctx here` request marks its boundary; a
+native compaction cannot be attributed that way. `/ctx` labels each number
+`measured`, `estimated`, or `modelled` so the difference stays visible.
 
 ## Privacy
 

@@ -77,6 +77,50 @@ test("the configured horizon list controls which projections are shown", async (
   expect(advisory.projections.map((entry) => entry.turns)).toEqual([2, 20])
 })
 
+test("calibrated compactions supply the summary size and real costs", async () => {
+  const calibration = {
+    models: {
+      "deepseek/deepseek-v4-pro": {
+        summary: { value: 5_000, samples: 2 },
+        request: { value: { input: 100_000, read: 0, write: 0, output: 5_000 }, samples: 1 },
+        rebuild: { value: { input: 1_000, read: 4_000, write: 900, output: 200 }, samples: 1 },
+      },
+    },
+  }
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8 }, pin: { cacheHitRatio: 0.8 } },
+    model: PRICED_MODEL,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+    calibration,
+  })
+  expect(advisory.estimates.summaryTokens).toBe(5_000)
+  expect(advisory.estimates.summarySource).toBe("measured")
+  expect(advisory.estimates.summaryCost).toBeCloseTo(0.11, 9)
+  expect(advisory.estimates.summaryCostSource).toBe("measured")
+  expect(advisory.estimates.rebuildSource).toBe("measured")
+  expect(advisory.estimates.rebuildCost).toBeCloseTo(0.002525, 9)
+})
+
+test("without calibration the summary size and costs are explicitly assumed", async () => {
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, summaryTokens: 1200 }, pin: { cacheHitRatio: 0.8 } },
+    model: PRICED_MODEL,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+  })
+  expect(advisory.estimates).toMatchObject({
+    summaryTokens: 1200,
+    summarySource: "assumed",
+    summaryCostSource: "estimated",
+    rebuildCost: null,
+    rebuildSource: "modelled",
+  })
+  expect(advisory.estimates.summaryCost).toBeGreaterThan(0)
+})
+
 test("missing prices never veto the structural verdict", async () => {
   const { advisory } = await advise({
     config: { compaction: { expectedTurns: 8 } },

@@ -52,6 +52,7 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
           ? "configured fallback"
           : "none"
   const projections = Array.isArray(advisory.projections) ? advisory.projections : []
+  const estimates = advisory.estimates ?? null
   return join(
     section("advisory", [
       ["verdict", advisory.verdict],
@@ -78,6 +79,23 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
               `${entry.worthIt ? "worth it" : "not yet"} · ${signedDollars(entry.net)} net`,
             ]),
           ),
+        ]
+      : []),
+    ...(estimates
+      ? [
+          section("estimation", [
+            ["summary", `${Math.round(Number(estimates.summaryTokens) || 0)} tokens (${estimates.summarySource})`],
+            [
+              "summary cost",
+              `${dollars(estimates.summaryCost)} (${estimates.summaryCostSource})`,
+            ],
+            [
+              "rebuild",
+              estimates.rebuildCost == null
+                ? "modelled"
+                : `${dollars(estimates.rebuildCost)} (${estimates.rebuildSource})`,
+            ],
+          ]),
         ]
       : []),
     section("steady", [

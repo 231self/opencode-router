@@ -5,7 +5,9 @@ import path from "node:path"
 
 import { readPin, writePin } from "@231self/opencode-shared/state.js"
 
+import { readCalibration } from "../src/calibration.js"
 import { runContext } from "../src/context.js"
+import { UsageTracker } from "../src/usage.js"
 
 const MODELS = [
   {
@@ -154,6 +156,69 @@ test("context hook resolves catalog limits when the event model omits them", asy
   })
   expect(seen[0].limit.context).toBe(262144)
   expect(readPin("opencode", "ses_1", env).model.id).toBe("deepseek-flash")
+})
+
+test("a compaction checkpoint calibrates summary size, request cost, and rebuild", async () => {
+  const env = tempEnv()
+  const now = 1_800_000_000_000
+  const usage = new UsageTracker({ env, now: () => now })
+  // The summary request: one step after the /ctx here marker.
+  usage.noteStepStart({ sessionID: "ses_1", model: MODELS[0], at: now - 1_000 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 100_000, output: 800, cache: { read: 0, write: 0 } },
+    at: now - 500,
+  })
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 90_000, afterTokens: 5_000, partsPruned: 0, overflow: false },
+    }),
+  }
+  const { run } = harness({ env, core, usage })
+  writePin(
+    "opencode",
+    "ses_1",
+    {
+      model: { providerID: "deepseek", id: "deepseek-flash" },
+      lastContextTokens: 90_000,
+      compaction: { requestedAt: now - 2_000 },
+    },
+    env,
+  )
+  const messages = [
+    { type: "compaction", status: "completed", id: "cp-1", summary: "parser state: ".concat("x".repeat(400)) },
+    { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
+  ]
+  const event = { sessionID: "ses_1", model: MODELS[0], system: [], messages }
+  await run(event)
+
+  const pin = readPin("opencode", "ses_1", env)
+  expect(pin.compaction.checkpoint).toBe("cp-1")
+  expect(pin.compaction.lastRequestAt).toBeUndefined()
+  const entry = readCalibration(env).models["deepseek/deepseek-flash"]
+  expect(entry.summary.samples).toBe(1)
+  expect(entry.summary.value).toBeGreaterThan(100)
+  expect(entry.request.samples).toBe(1)
+  expect(entry.request.value.output).toBe(800)
+  expect(entry.compactions).toBe(1)
+
+  // The resumed turn reports its own usage; the next hook records it as the
+  // rebuild cost once, not on every later turn.
+  usage.noteStepStart({ sessionID: "ses_1", model: MODELS[0], at: now + 1_000 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 1_000, output: 200, cache: { read: 4_000, write: 900 } },
+    at: now + 2_000,
+  })
+  await run(event)
+  const rebuilt = readCalibration(env).models["deepseek/deepseek-flash"]
+  expect(rebuilt.rebuild.samples).toBe(1)
+  expect(rebuilt.rebuild.value.write).toBe(900)
+  expect(rebuilt.rebuild.value.output).toBe(200)
+
+  await run(event)
+  expect(readCalibration(env).models["deepseek/deepseek-flash"].rebuild.samples).toBe(1)
 })
 
 test("a context write cannot clobber a newer routing pin", async () => {
