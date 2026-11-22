@@ -7,7 +7,7 @@ import { DEFAULT_CONFIG } from "@231self/opencode-shared/config.js"
 import { readPin, writePin } from "@231self/opencode-shared/state.js"
 
 import { runContext } from "../src/context.js"
-import { advisoryReport } from "../src/tui.js"
+import tui, { advisoryReport } from "../src/tui.js"
 
 const MODELS = [
   {
@@ -132,7 +132,7 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
   expect(report).toContain("compact-now")
   expect(report).toContain("break-even")
   expect(report).toContain("2 turns")
-  expect(report).toContain("/compact here")
+  expect(report).toContain("/ctx here")
   expect(report).toContain("0.25")
 })
 
@@ -140,4 +140,24 @@ test("an empty advisory explains itself instead of inventing numbers", () => {
   const report = advisoryReport(null, {})
   expect(report).toContain("No advisory yet")
   for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(80)
+})
+
+test("the TUI slash command does not shadow the host's native /compact", () => {
+  const layers = []
+  const context = {
+    data: { on: () => ({ dispose() {} }) },
+    keymap: {
+      layer: (factory) => {
+        layers.push(factory())
+        return () => {}
+      },
+    },
+    ui: { toast: { show: async () => {} }, router: { current: () => null } },
+  }
+  const dispose = tui.setup(context)
+  const command = layers[0].commands[0]
+  expect(command.slash.name).toBe("ctx")
+  expect(command.slash.aliases ?? []).not.toContain("compact")
+  expect(command.slash.aliases ?? []).not.toContain("ctx")
+  dispose()
 })

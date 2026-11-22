@@ -7,7 +7,7 @@ security gate, and one staged release pipeline.
 | Package | Role |
 |---|---|
 | [`@231self/opencode-router`](packages/router) | Routes each turn to the best model from your pool (small local judge + deterministic floor), with pins, failover, subagent policy, a TUI `/router` surface, and a CLI. |
-| [`@231self/opencode-compaction`](packages/compaction) | Context management: the context optimiser, a priced compact/keep/delegate advisory (`/compact`), and `/compact here`. |
+| [`@231self/opencode-compaction`](packages/compaction) | Context management: the context optimiser, a priced compact/keep/delegate advisory (`/ctx`), and `/ctx here`. |
 | [`@231self/opencode-shared`](packages/shared) | Shared runtime: cache-aware pricing/measurement, config/state host adapters, Kilo shim, model-ref semantics. Zero dependencies. |
 
 ```sh

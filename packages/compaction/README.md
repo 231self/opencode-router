@@ -49,9 +49,11 @@ signals are unclear — a small local judge answering a rubric. The verdict
 cannot flicker: changes wait out a cooldown that grows with the judge's
 measured instability.
 
-**`/compact`** (alias `/ctx`) in the TUI shows the current verdict with its
-numbers and what to do about it. **`/compact here`** asks the host to
-compact this session; the request clears itself even if the host refuses.
+**`/ctx`** in the TUI shows the current verdict with its numbers and what to
+do about it. **`/ctx here`** asks the host to compact this session; the
+request clears itself even if the host refuses. OpenCode already has its own
+`/compact`; this plugin leaves that command alone and does not register a
+`compact` alias.
 
 ## Settings
 

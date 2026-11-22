@@ -31,7 +31,7 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   if (!advisory) {
     return join(
       note(
-        "No advisory yet. It is computed from the next turn's context measurement; run this command again after a turn.",
+        "No advisory yet. The next turn computes it; run /ctx again after a turn.",
       ),
     )
   }
@@ -54,10 +54,10 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
     ]),
     note(
       advisory.verdict === "delegate"
-        ? "The next step looks like review or verification. A fresh-context subagent judges it better than this history; the Elephant-Goldfish pattern. Route it to a subagent and keep this session for the work."
+        ? "The next step looks like review or verification. Send it to a fresh subagent; a reviewer without this session's history usually judges the work better."
         : advisory.verdict === "compact-now"
-          ? "Compaction pays for itself soon. Run /compact here to compact at the recommended checkpoint now."
-          : "Keep working. Compaction is either not safe yet or does not pay for itself within the horizon.",
+          ? "Compaction pays for itself soon. Run /ctx here to compact at the recommended checkpoint."
+          : "Keep working. There is no safe checkpoint yet, or compaction would not pay for itself within the horizon.",
     ),
   )
 }
@@ -86,7 +86,7 @@ async function runCommand(context, input) {
     await show(
       context,
       prose(
-        "Compaction requested. The context hook passes it to the host at the next turn; the marker clears itself even if the host refuses, so this never loops.",
+        "Compaction requested. The next turn asks the host to compact; if it declines, the request is dropped and nothing repeats.",
       ),
     )
     return
@@ -97,9 +97,9 @@ async function runCommand(context, input) {
       context,
       join(
         section("commands", [
-          ["/compact", "this advisory: verdict, economics, and what to do"],
-          ["/compact here", "ask the host to compact this session now"],
-          ["/compact help", "this text"],
+          ["/ctx", "the current advisory: verdict, economics, and what to do"],
+          ["/ctx here", "ask the host to compact this session now"],
+          ["/ctx help", "this text"],
         ]),
       ),
     )
@@ -107,7 +107,7 @@ async function runCommand(context, input) {
   }
 
   if (command !== "") {
-    await show(context, prose(`unknown command: ${command}. Try /compact help`))
+    await show(context, prose(`Unknown command: ${command}. Try /ctx help.`))
     return
   }
 
@@ -123,8 +123,11 @@ async function runCommand(context, input) {
  * OpenCode TUI part. Plain object export, no JSX, no TypeScript.
  *
  * Shows the compaction advisory for the current session and takes the
- * explicit `/compact here` request (the session side performs the host
+ * explicit `/ctx here` request (the session side performs the host
  * compaction). Toasts when the advisory verdict changes between turns.
+ *
+ * The slash name is `ctx`, not `compact`: OpenCode already owns `/compact`,
+ * and a plugin command with the same name shadows or duplicates it.
  */
 export default {
   id: "omlx-compaction.tui",
@@ -147,10 +150,10 @@ export default {
               title: "Context Compaction",
               message:
                 verdict === "compact-now"
-                  ? "Compaction advised: it pays for itself soon. Run /compact for details."
+                  ? "Compaction is worth doing soon. Run /ctx for the numbers."
                   : verdict === "delegate"
-                    ? "Fresh-context review advised: a subagent would judge this step better. Run /compact."
-                    : "Compaction verdict changed. Run /compact for details.",
+                    ? "This step looks like review. A fresh subagent may judge it better. Run /ctx for details."
+                    : "Compaction verdict changed. Run /ctx for details.",
               duration: 8000,
             })
           } catch {
@@ -169,7 +172,7 @@ export default {
           title: "Context Compaction: advisory",
           group: "Context Compaction",
           palette: true,
-          slash: { name: "compact", aliases: ["ctx"], arguments: true },
+          slash: { name: "ctx", arguments: true },
           run: async (input) => {
             try {
               await runCommand(context, input)

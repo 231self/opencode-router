@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The TUI command is `/ctx` only. OpenCode already owns `/compact`, so the
+  plugin's slash command — and its `ctx` alias — duplicated or shadowed the
+  native command. `/ctx` shows the advisory; `/ctx here` asks the host to
+  compact. The popup copy now says what will happen instead of describing the
+  hook machinery.
+
 ## 0.1.0 — 2026-11-22
 
 ### Added

@@ -124,7 +124,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
 }
 
 /**
- * Honor a `/compact here` request from the TUI. The marker is cleared before
+ * Honor a `/ctx here` request from the TUI. The marker is cleared before
  * the host call so a failed or refused compaction never loops.
  */
 export async function honorCompactRequest({ host, env, ctx, sessionID }) {
