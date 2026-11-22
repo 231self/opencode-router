@@ -40,6 +40,43 @@ test("a pressured boundary with prices advises compaction when it pays", async (
   expect(guard.verdict).toBe("compact-now")
 })
 
+test("a measured cache ratio replaces the configured fallback", async () => {
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, horizons: [3, 8, 15] }, pin: { cacheHitRatio: 0.8 } },
+    model: PRICED_MODEL,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+    cache: { ratio: 0.95, samples: 4, source: "measured" },
+  })
+  expect(advisory.cache.ratio).toBe(0.95)
+  expect(advisory.cache.source).toBe("measured")
+  expect(advisory.projections.map((entry) => entry.turns)).toEqual([3, 8, 15])
+  expect(advisory.projections).toHaveLength(3)
+})
+
+test("without provider usage the advisory records the configured fallback", async () => {
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8 }, pin: { cacheHitRatio: 0.8 } },
+    model: PRICED_MODEL,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+  })
+  expect(advisory.cache).toEqual({ ratio: 0.8, samples: 0, source: "fallback" })
+})
+
+test("the configured horizon list controls which projections are shown", async () => {
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, horizons: [2, 20] }, pin: { cacheHitRatio: 0.8 } },
+    model: PRICED_MODEL,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+  })
+  expect(advisory.projections.map((entry) => entry.turns)).toEqual([2, 20])
+})
+
 test("missing prices never veto the structural verdict", async () => {
   const { advisory } = await advise({
     config: { compaction: { expectedTurns: 8 } },

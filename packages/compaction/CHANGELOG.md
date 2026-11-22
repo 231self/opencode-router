@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- The advisory prices with the cache hit rate the provider actually reported
+  over the last five steps on the current model (`cacheWindow`). An idle gap
+  longer than the provider's cache lifetime is treated as a cold cache; the
+  defaults are five minutes for Anthropic and OpenAI, and no expiry for
+  unknown providers. `pin.cacheHitRatio` remains the fallback until the first
+  measurement. `/ctx` shows the rate, source, and sample count.
+- `/ctx` shows the same economics at 3, 8, and 15 turns (`horizons`), not just
+  at the decision horizon.
+
 ## 0.1.1 — 2026-11-22
 
 ### Fixed

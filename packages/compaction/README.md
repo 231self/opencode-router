@@ -49,6 +49,17 @@ signals are unclear — a small local judge answering a rubric. The verdict
 cannot flicker: changes wait out a cooldown that grows with the judge's
 measured instability.
 
+The price uses the host's reported usage, not a fixed guess. The cache hit
+rate is the share the provider served from cache over the last five steps on
+the current model. An idle gap longer than the provider's cache lifetime is
+treated as a cold cache. `/ctx` shows the rate, its source, and the sample
+count; the configured `pin.cacheHitRatio` is only the fallback before the
+first measurement.
+
+The decision horizon stays `expectedTurns`, but `/ctx` also shows the same
+economics at 3, 8, and 15 turns (`horizons`), so you can see where the answer
+flips instead of guessing when the session ends.
+
 **`/ctx`** in the TUI shows the current verdict with its numbers and what to
 do about it. **`/ctx here`** asks the host to compact this session; the
 request clears itself even if the host refuses. OpenCode already has its own
@@ -66,7 +77,9 @@ In `~/.config/omlx-router/config.json`:
     "expectedTurns": 8,
     "baseCooldown": 3,
     "judgeRefine": true,
-    "summaryTokens": 1200
+    "summaryTokens": 1200,
+    "horizons": [3, 8, 15],
+    "cacheWindow": 5
   }
 }
 ```
@@ -74,10 +87,14 @@ In `~/.config/omlx-router/config.json`:
 | Setting | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | `false` turns the advisory off. |
-| `expectedTurns` | `8` | Horizon for "does compaction pay?" |
+| `expectedTurns` | `8` | Decision horizon for "does compaction pay?" |
 | `baseCooldown` | `3` | Turns a verdict change must wait. |
 | `judgeRefine` | `true` | Let the judge resolve unclear cases. |
 | `summaryTokens` | `1200` | Assumed size of a compaction summary. |
+| `horizons` | `[3, 8, 15]` | Turns shown in the `/ctx` projection table. |
+| `cacheWindow` | `5` | Provider steps used for the measured hit rate. |
+| `cacheTtlMs` | `0` | Global cache lifetime override; `0` uses the provider table. |
+| `cacheTtlByProvider` | Anthropic/OpenAI 5 min | Per-provider idle expiry; `0` disables it. |
 
 The file is read as strict JSON, so keep comments out of it.
 
@@ -106,6 +123,16 @@ veto and the cooldown. Repeats are real samples. The tolerance bench scores
 each model with its full context and with a compacted checkpoint; a
 deliberately lossy control task is reported separately so a model is not
 punished for refusing to answer from missing evidence.
+
+## Current limits
+
+The cache hit rate is measured from provider-reported usage when the host
+reports it; until then the configured fallback is used. The compacted size is
+still an estimate: `summaryTokens` plus the recent tail. The next improvement
+is to measure what OpenCode actually spends to summarize and rebuild the
+context, and to replace the assumed summary size with the observed
+post-compaction size. `/ctx` records the measured rate and its source so the
+difference stays visible.
 
 ## Privacy
 

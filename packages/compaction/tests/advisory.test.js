@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test"
 
-import { composeAdvisory, cooldownTurns, guardAllows } from "../src/advisory.js"
+import {
+  DEFAULT_HORIZONS,
+  composeAdvisory,
+  cooldownTurns,
+  guardAllows,
+  normaliseHorizons,
+  projectHorizons,
+} from "../src/advisory.js"
 import { instabilityBand, verdictInstability } from "../src/noise.js"
 import { refineVerdict, rubricPrompt, validateAction } from "../src/refine.js"
 
@@ -69,6 +76,33 @@ test("a blocked change reports the standing verdict", () => {
   })
   expect(advisory.verdict).toBe("delegate")
   expect(advisory.source).toBe("guard")
+})
+
+test("horizons are sorted, deduped, and bounded", () => {
+  expect(normaliseHorizons(undefined)).toEqual(DEFAULT_HORIZONS)
+  expect(normaliseHorizons([15, 3, 8, 8, 0, -1, 500])).toEqual([3, 8, 15])
+})
+
+test("each horizon reports its own net and worth-it answer", () => {
+  const projections = projectHorizons(
+    { perTurnSavings: 0.02, invalidationCost: 0.05, breakEvenTurns: 3 },
+    [3, 8, 15],
+  )
+  expect(projections.map((entry) => entry.turns)).toEqual([3, 8, 15])
+  expect(projections[0].worthIt).toBe(true)
+  expect(projections[0].net).toBeCloseTo(0.01, 9)
+  expect(projections[1].net).toBeCloseTo(0.11, 9)
+  expect(projections[2].net).toBeCloseTo(0.25, 9)
+})
+
+test("an unprofitable compaction is not worth it at any shown horizon", () => {
+  const projections = projectHorizons(
+    { perTurnSavings: 0.0001, invalidationCost: 0.5, breakEvenTurns: 5000 },
+    [3, 8, 15],
+  )
+  expect(projections.every((entry) => !entry.worthIt)).toBe(true)
+  expect(projections[2].net).toBeLessThan(0)
+  expect(projectHorizons(null)).toEqual([])
 })
 
 test("verdict instability measures self-contradiction", () => {

@@ -24,6 +24,11 @@ function dollars(value) {
   return `$${(Number(value) || 0).toFixed(4)}`
 }
 
+function signedDollars(value) {
+  const number = Number(value) || 0
+  return `${number < 0 ? "-" : ""}$${Math.abs(number).toFixed(4)}`
+}
+
 /** The advisory popup body: one fact per row, 72 columns, hanging indent. */
 export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   const state = pin?.compaction ?? null
@@ -36,6 +41,17 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
     )
   }
   const held = Math.max(0, (Number(state.turns) || 0) - (Number(state.changedTurns) || 0))
+  const cache = advisory.cache ?? {}
+  const ratio = Number(cache.ratio) || 0
+  const source =
+    cache.source === "measured"
+      ? "measured"
+      : cache.source === "expired"
+        ? "expired (idle)"
+        : cache.source === "fallback"
+          ? "configured fallback"
+          : "none"
+  const projections = Array.isArray(advisory.projections) ? advisory.projections : []
   return join(
     section("advisory", [
       ["verdict", advisory.verdict],
@@ -48,6 +64,22 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
       ["horizon", `${expectedTurns} turns`],
       ["worth it", advisory.worthIt ? "yes" : "no"],
     ]),
+    section("cache", [
+      ["hit rate", source === "none" ? "unknown" : `${Math.round(ratio * 100)}%`],
+      ["source", source],
+      ["samples", String(Number(cache.samples) || 0)],
+    ]),
+    ...(projections.length > 0
+      ? [
+          section(
+            "horizons",
+            projections.map((entry) => [
+              `${entry.turns} turns`,
+              `${entry.worthIt ? "worth it" : "not yet"} · ${signedDollars(entry.net)} net`,
+            ]),
+          ),
+        ]
+      : []),
     section("steady", [
       ["held for", `${held} turns`],
       ["noise band", (Number(noise?.instability) || 0).toFixed(2)],

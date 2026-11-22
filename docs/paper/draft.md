@@ -131,7 +131,10 @@ them in catalog order.
 prompt cache; the challenger's first turn pays full input price. The router
 prices this asymmetry with the measured cache-hit share and floors the
 switch threshold at the judge's own verdict-noise band, so a model is never
-flipped on a score gap smaller than the judge can distinguish.
+flipped on a score gap smaller than the judge can distinguish. The compaction
+advisory prices with the same measured share over the last five steps on the
+current model, treating an idle gap longer than the provider's cache lifetime
+as a cold cache; the configured ratio is only the pre-measurement fallback.
 
 ## 5. Preliminary measurements
 
@@ -160,10 +163,14 @@ flipped on a score gap smaller than the judge can distinguish.
 The break-even model treats the compacted size as a configuration estimate
 (summary size plus the recent tail) rather than a measured value; the JS
 advisory models repeated compaction within a horizon as one compaction; and
-the growth projection assumes the current prompt is representative. The
-direction of the error is mixed rather than one-sided: a summary larger than
-the estimate understates the premium and makes compaction look cheaper, while
-a prompt busier than average overstates growth and makes it look dearer. The
+the growth projection assumes the current prompt is representative. The cache
+hit rate is no longer assumed: the advisory uses provider-reported usage over
+recent steps, with idle expiry for providers whose cache lifetime is known.
+The remaining estimate is the compacted size, and the next measurement is what
+the host actually spends to summarize and rebuild the context. The direction
+of the error is mixed rather than one-sided: a summary larger than the
+estimate understates the premium and makes compaction look cheaper, while a
+prompt busier than average overstates growth and makes it look dearer. The
 verdict layer's generalization rests on a four-case calibration and a small
 local judge; the artifact mechanism (calibrate, store, respect the band) is
 the claim, not any single verdict.

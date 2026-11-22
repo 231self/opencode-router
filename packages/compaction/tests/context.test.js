@@ -39,7 +39,7 @@ function tempEnv() {
   }
 }
 
-function harness({ core, env }) {
+function harness({ core, env, usage = null }) {
   const ctx = {
     model: { list: async () => MODELS },
     provider: { list: async () => [] },
@@ -48,7 +48,7 @@ function harness({ core, env }) {
   }
   return {
     ctx,
-    run: (event) => runContext({ host: "opencode", env, ctx, config: {}, core, event }),
+    run: (event) => runContext({ host: "opencode", env, ctx, config: {}, core, event, usage }),
   }
 }
 
@@ -61,6 +61,29 @@ test("context hook stores the token estimate", async () => {
     messages: [{ parts: [{ type: "text", text: "hello world" }] }],
   })
   expect(readPin("opencode", "ses_1", env).lastContextTokens).toBeGreaterThan(0)
+})
+
+test("context hook prices with the measured cache ratio", async () => {
+  const env = tempEnv()
+  const usage = {
+    ratioFor: () => ({ ratio: 0.93, samples: 5, source: "measured", lastAt: 1 }),
+  }
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 60_000, afterTokens: 60_000, partsPruned: 0, overflow: false },
+    }),
+  }
+  const { run } = harness({ env, core, usage })
+  await run({
+    sessionID: "ses_1",
+    model: MODELS[0],
+    system: [],
+    messages: [{ parts: [] }],
+  })
+  const advisory = readPin("opencode", "ses_1", env).compaction.advisory
+  expect(advisory.cache).toMatchObject({ ratio: 0.93, samples: 5, source: "measured" })
+  expect(advisory.projections.map((entry) => entry.turns)).toEqual([3, 8, 15])
 })
 
 test("context hook applies the optimiser plan and records the result", async () => {

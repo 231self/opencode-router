@@ -1,7 +1,7 @@
 import { compactionRoi, normaliseCost } from "@231self/opencode-shared/cost.js"
 import { partTokens } from "@231self/opencode-shared/tokens.js"
 
-import { composeAdvisory, guardAllows } from "./advisory.js"
+import { composeAdvisory, guardAllows, normaliseHorizons, projectHorizons } from "./advisory.js"
 import { refineVerdict } from "./refine.js"
 import { extractSignals, scoreSignals } from "./trigger.js"
 
@@ -29,6 +29,7 @@ export async function advise({
   guard = null,
   judge = null,
   refine = null,
+  cache = null,
   noise = null,
 }) {
   const settings = config?.compaction ?? {}
@@ -47,19 +48,23 @@ export async function advise({
   }
 
   // The economics layer needs real prices; without them the advisory stands
-  // on structure alone (no veto from invented zeros).
+  // on structure alone (no veto from invented zeros). The hit rate is the
+  // measured share when the host reported usage, and the configured fallback
+  // only when nothing has been observed.
   const tier = pricedTier(model)
+  const ratio = cache?.ratio ?? (Number(config?.pin?.cacheHitRatio) || 0)
   const roi = tier
     ? compactionRoi({
         price: tier,
         contextTokens: measuredTokens,
         compactedTokens: compactedEstimate(messages, settings),
         cacheState: null,
-        cacheHitRatio: config?.pin?.cacheHitRatio,
+        cacheHitRatio: ratio,
         outputTokens: 0,
         expectedTurns: Number(settings.expectedTurns) || 0,
       })
     : null
+  const horizons = normaliseHorizons(settings.horizons)
 
   const advisory = composeAdvisory({
     structural,
@@ -68,6 +73,8 @@ export async function advise({
     guard,
     instability: Number(noise?.instability) || 0,
     baseCooldown: Number(settings.baseCooldown) || 3,
+    cache: cache ?? { ratio, samples: 0, source: "fallback" },
+    projections: projectHorizons(roi, horizons),
   })
   return { advisory, guard: nextGuard(guard, advisory) }
 }

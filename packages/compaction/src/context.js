@@ -47,7 +47,7 @@ export function contextMessages({ core, config, model, messages, system = [] }) 
  * The V2 `context` hook: optimise the live context and record its measurement
  * in the session pin. A failed measurement or prune must never break a turn.
  */
-export async function runContext({ host, env, ctx, config, core, event, judge = null }) {
+export async function runContext({ host, env, ctx, config, core, event, judge = null, usage = null }) {
   try {
     const sessionID = event?.sessionID
     if (!sessionID) return
@@ -89,6 +89,22 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     let compactionState = latest.compaction ?? null
     if (config.compaction?.enabled !== false) {
       try {
+        let cache = null
+        try {
+          const settings = config.compaction ?? {}
+          cache = usage
+            ? usage.ratioFor({
+                sessionID,
+                model: target,
+                fallback: Number(config.pin?.cacheHitRatio ?? 0.8),
+                window: settings.cacheWindow,
+                ttlByProvider: settings.cacheTtlByProvider,
+                ttlMs: settings.cacheTtlMs,
+              })
+            : null
+        } catch {
+          // A missing measurement falls back to the configured ratio.
+        }
         const { advisory, guard } = await advise({
           config,
           model,
@@ -97,6 +113,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
           previousTokens: Number(latest.lastContextTokens) || 0,
           guard: latest.compaction ?? null,
           judge,
+          cache,
           noise: readCompactionNoise(env),
         })
         compactionState = { ...guard, advisory }

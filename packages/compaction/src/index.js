@@ -4,6 +4,7 @@ import { createKiloContext } from "@231self/opencode-shared/kilo.js"
 import { refOf } from "@231self/opencode-shared/refs.js"
 
 import { contextMessages, runContext } from "./context.js"
+import { UsageTracker } from "./usage.js"
 import { VERSION } from "./version.js"
 import { loadCore } from "./wasm.js"
 
@@ -42,12 +43,39 @@ export default {
     // The judge refines "uncertain" compaction verdicts only; it is created
     // once and reconfigured per turn so settings changes apply live.
     const judge = new JudgeClient({ config: read().judge, env: process.env })
+    const usage = new UsageTracker({ host: "opencode" })
 
     await register("context", (event) => {
       const config = read()
       judge.configure(config.judge)
-      return runContext({ host: "opencode", env: process.env, ctx, config, core, event, judge })
+      return runContext({ host: "opencode", env: process.env, ctx, config, core, event, judge, usage })
     })
+
+    // Provider-reported cache usage, kept in memory per session. The router
+    // persists the same numbers; reading its turn log seeds a plugin restart.
+    if (ctx.event?.subscribe) {
+      const controller = new AbortController()
+      void (async () => {
+        try {
+          const events = ctx.event.subscribe({
+            types: ["session.step.started", "session.step.ended"],
+            signal: controller.signal,
+          })
+          for await (const event of events) {
+            const data = event?.data ?? {}
+            const at = Number(event?.created) || Date.now()
+            if (event?.type === "session.step.started") {
+              usage.noteStepStart({ sessionID: data.sessionID, model: data.model, at })
+            } else if (event?.type === "session.step.ended") {
+              usage.noteStepEnd({ sessionID: data.sessionID, tokens: data.tokens, at })
+            }
+          }
+        } catch (cause) {
+          if (read().debug) console.error("[omlx-compaction] usage stream stopped:", String(cause?.message ?? cause))
+        }
+      })()
+      disposers.push({ dispose: () => controller.abort() })
+    }
 
     if (read().debug) {
       console.log("[omlx-compaction] loaded", {

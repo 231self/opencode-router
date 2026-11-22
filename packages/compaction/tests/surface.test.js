@@ -44,7 +44,7 @@ function harness({ env, core = {}, compact = async () => {}, config = {} }) {
   }
 }
 
-test("a /compact here marker is honored once and cleared", async () => {
+test("a /ctx here marker is honored once and cleared", async () => {
   const env = tempEnv()
   const compacted = []
   const { run, ctx } = harness({
@@ -123,6 +123,12 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
         breakEvenTurns: 2,
         perTurnSavings: 0.0123,
         worthIt: true,
+        cache: { ratio: 0.82, samples: 6, source: "measured" },
+        projections: [
+          { turns: 3, net: -0.0041, worthIt: false },
+          { turns: 8, net: 0.0524, worthIt: true },
+          { turns: 15, net: 0.14, worthIt: true },
+        ],
       },
     },
   }
@@ -134,6 +140,11 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
   expect(report).toContain("2 turns")
   expect(report).toContain("/ctx here")
   expect(report).toContain("0.25")
+  expect(report).toContain("82%")
+  expect(report).toContain("measured")
+  expect(report).toContain("horizons")
+  expect(report).toContain("3 turns")
+  expect(report).toContain("-$0.0041")
 })
 
 test("an empty advisory explains itself instead of inventing numbers", () => {
