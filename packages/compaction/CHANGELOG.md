@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3 — 2026-11-23
+
+### Fixed
+
+- The context hook measures the active session (`ctx.session.context`) instead
+  of its local outgoing message segment. In a 233k-token session the plugin
+  recorded 7,461 tokens, so `/ctx` reported `not-yet` from the small-context
+  branch while the session was under real pressure. The active size now drives
+  `lastContextTokens`, growth, checkpoint detection, and the compacted tail.
+  `contextMessageTokens` is shared by the active-context counter and the tail
+  estimator.
+
 ## 0.1.2 — 2026-11-22
 
 ### Added

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 — 2026-11-23
+
+### Changed
+
+- Documentation and release only. Carries compaction `0.1.3`, which measures
+  the active session context instead of the hook's outgoing segment. No router
+  code changes.
+
 ## 0.3.2 — 2026-11-22
 
 ### Changed

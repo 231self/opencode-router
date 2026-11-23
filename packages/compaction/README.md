@@ -58,7 +58,8 @@ first measurement.
 
 The decision horizon stays `expectedTurns`, but `/ctx` also shows the same
 economics at 3, 8, and 15 turns (`horizons`), so you can see where the answer
-flips instead of guessing when the session ends.
+flips instead of guessing when the session ends. Context size comes from the
+active session (`ctx.session.context`), not just the outgoing request segment.
 
 The compacted size and the one-time cost are calibrated from real compactions.
 After each checkpoint the plugin compares its prediction with the context the
