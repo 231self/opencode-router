@@ -10,11 +10,16 @@ export function estimateTokens(text) {
   return Math.ceil(ascii / 4 + wide / 1.6)
 }
 
-export function partTokens(part) {
+/**
+ * Prompt-visible tokens for one part: what the provider bills as prompt.
+ *
+ * Reasoning is regenerated rather than re-sent, and ids, timestamps and
+ * snapshots are host bookkeeping, so neither belongs in a prompt size.
+ */
+export function promptPartTokens(part) {
   if (!part) return 0
   switch (part.type) {
     case "text":
-    case "reasoning":
       return estimateTokens(part.text ?? "")
     case "tool": {
       const state = part.state ?? {}
@@ -29,6 +34,18 @@ export function partTokens(part) {
   }
 }
 
+/** Everything a part carries, reasoning included. Used to size a prune. */
+export function partTokens(part) {
+  if (!part) return 0
+  if (part?.type === "reasoning") return estimateTokens(part.text ?? "")
+  return promptPartTokens(part)
+}
+
+/** Prompt text of a message that carries fields instead of parts. */
+function promptTextTokens({ text, command, output }) {
+  return estimateTokens([text, command, output].filter(Boolean).join("\n"))
+}
+
 export function countContextTokens({ system, messages } = {}) {
   let total = 0
   for (const part of system ?? []) total += partTokens(part)
@@ -40,7 +57,7 @@ export function countContextTokens({ system, messages } = {}) {
     }
     const parts = message?.parts ?? message?.content
     if (typeof parts === "string") total += estimateTokens(parts)
-    else if (Array.isArray(parts)) for (const part of parts) total += partTokens(part)
+    else if (Array.isArray(parts)) for (const part of parts) total += promptPartTokens(part)
   }
   return total
 }
@@ -49,6 +66,11 @@ export function countContextTokens({ system, messages } = {}) {
  * Tokens for one V2 active-context message, or null when the message shape is
  * not recognized. Shared by `measureSessionContext` and the compaction tail
  * estimator so both count the same message once.
+ *
+ * Only prompt-visible content is counted. A message's own `native`, `snapshot`
+ * and metadata fields, and a part's reasoning, are host bookkeeping: counting
+ * them read a 500k-token session as 496k of context when the provider billed
+ * 159k for the same turn.
  */
 export function contextMessageTokens(message) {
   const { type, text, content, files, skills, command, output } = message ?? {}
@@ -67,15 +89,17 @@ export function contextMessageTokens(message) {
     case "synthetic":
     case "system":
     case "skill":
-    case "assistant":
     case "shell":
       // Unresolved attachments can expand to an unknown size.
       if (files?.length || skills?.length) return null
-      return (
-        estimateTokens(
-          JSON.stringify({ text, content, command, output, native: message.native }),
-        ) + 16
-      )
+      return promptTextTokens({ text, command, output }) + 16
+    case "assistant": {
+      if (files?.length || skills?.length) return null
+      if (!Array.isArray(content)) return promptTextTokens({ text, command, output }) + 16
+      let total = 16
+      for (const part of content) total += promptPartTokens(part)
+      return total
+    }
     case "model-switched":
     case "agent-switched":
     case "location-switched":

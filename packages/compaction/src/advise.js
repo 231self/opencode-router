@@ -1,5 +1,5 @@
-import { compactionRoi, modelledTurnCost, normaliseCost, tierAt } from "@231self/opencode-shared/cost.js"
-import { contextMessageTokens, partTokens } from "@231self/opencode-shared/tokens.js"
+import { compactionRoi, costState, modelledTurnCost, normaliseCost, tierAt } from "@231self/opencode-shared/cost.js"
+import { contextMessageTokens, promptPartTokens } from "@231self/opencode-shared/tokens.js"
 
 import { composeAdvisory, guardAllows, normaliseHorizons, projectHorizons } from "./advisory.js"
 import { bucketCost, calibrationFor } from "./calibration.js"
@@ -27,6 +27,7 @@ export async function advise({
   messages = [],
   tailMessages = null,
   measuredTokens = 0,
+  estimatedTokens = 0,
   previousTokens = 0,
   systemTokens = 0,
   guard = null,
@@ -56,6 +57,9 @@ export async function advise({
   // measured share when the host reported usage, and the configured fallback
   // only when nothing has been observed.
   const tiers = normaliseCost(model?.cost)
+  // Three states: priced (real numbers), flat (the pool publishes zeros), and
+  // unknown (no entry at all). Only `priced` supports a cost decision.
+  const pricing = costState(tiers)
   const ratio = cache?.ratio ?? (Number(config?.pin?.cacheHitRatio) || 0)
   const calibrated = calibrationFor(calibration, model)
   const measuredSummary = Number(calibrated?.summary?.value)
@@ -68,6 +72,12 @@ export async function advise({
   const system = Math.max(0, Number(systemTokens) || 0)
   const tail = tailTokens(tailMessages ?? messages)
   const compactedTokens = system + summaryTokens + tail
+  // The compacted shape is estimated in message tokens. Scaling it by the
+  // observed ratio to the measured size keeps the prediction and the actual
+  // recorded against it on one scale, so a prediction error means something.
+  const estimatorTokens = Math.max(0, Number(estimatedTokens) || 0)
+  const predictedCompacted =
+    estimatorTokens > 0 ? measuredTokens * (compactedTokens / estimatorTokens) : compactedTokens
   const summaryMeasured = Number(calibrated?.summary?.samples) > 0
   const requestMeasured = Number(calibrated?.request?.samples) > 0
   const rebuildMeasured = Number(calibrated?.rebuild?.samples) > 0
@@ -79,7 +89,8 @@ export async function advise({
   const rebuildCost = rebuildMeasured
     ? meanBucketCost(tiers, calibrated.rebuild, { output: false })
     : null
-  let summaryCost = summaryCostMeasured ?? 0
+  let summaryCost = null
+  let summaryCostSource = pricing === "flat" ? "flat plan ($0 marginal)" : "no price data"
   let keepCost = null
   let steadyCost = null
   let firstTurnCost = null
@@ -92,6 +103,10 @@ export async function advise({
         cacheHitRatio: ratio,
         outputTokens: summaryTokens,
       })
+      summaryCostSource = "modelled"
+    } else {
+      summaryCost = summaryCostMeasured
+      summaryCostSource = "measured"
     }
     keepCost = modelledTurnCost({
       price: keepTier,
@@ -136,17 +151,26 @@ export async function advise({
     guard,
     instability: Number(noise?.instability) || 0,
     baseCooldown: Number(settings.baseCooldown) || 3,
+    pricing,
     cache: cache ?? { ratio, samples: 0, source: "fallback" },
     projections: projectHorizons(roi, horizons),
     estimates: {
       summaryTokens,
       summarySource: summaryMeasured ? "measured" : "assumed",
-      predictedTotal: compactedTokens,
+      pricing,
+      predictedTotal: predictedCompacted,
       predictedModel: model ? `${model.providerID}/${model.id ?? model.modelID}` : null,
       summaryCost,
-      summaryCostSource: summaryCostMeasured != null ? "measured" : "estimated",
+      summaryCostSource,
       rebuildCost,
-      rebuildSource: rebuildCost != null ? "measured" : "modelled",
+      rebuildSource:
+        rebuildCost != null
+          ? "measured"
+          : pricing === "flat"
+            ? "flat plan ($0 marginal)"
+            : pricing === "priced"
+              ? "modelled"
+              : "no price data",
       lastPrediction: calibrated?.lastPrediction ?? null,
       predictionError: Number(calibrated?.error?.value) || 0,
     },
@@ -207,7 +231,7 @@ export function tailTokens(messages) {
       return total + (count == null ? 0 : count)
     }
     const parts = message?.parts ?? []
-    return total + parts.reduce((sum, part) => sum + partTokens(part), 0)
+    return total + parts.reduce((sum, part) => sum + promptPartTokens(part), 0)
   }, 0)
 }
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.3 — 2026-11-23
+
+### Added
+
+- `costState`, the three-way pricing read behind the compaction report:
+  `priced` (real numbers), `flat` (the pool publishes explicit zeros), and
+  `unknown` (no catalog entry). `xiaomi-token-plan-sgp/mimo-v2.6-pro` is
+  `flat`, `openai/gpt-6.2-sol` is `unknown`; they were previously
+  indistinguishable.
+- `promptPartTokens`, the prompt-visible size of one part.
+
+### Fixed
+
+- The active-context counter no longer counts reasoning and host bookkeeping
+  as prompt. `contextMessageTokens` stringified whole messages, so reasoning
+  text, `reasoningEncryptedContent`, snapshots, timestamps and the compaction
+  message's `metadata.recent` all counted toward the context size. On a real
+  500k-token session that read as 496,861 tokens against a billed prefill of
+  159,057. `countContextTokens` uses the same prompt-only rule.
+
 ## 0.1.2 — 2026-11-23
 
 ### Added

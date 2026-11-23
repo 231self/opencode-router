@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.5 — 2026-11-23
+
+### Fixed
+
+- Context measurement no longer counts reasoning and host bookkeeping as
+  prompt. `measureSessionContext` is shared with the compaction plugin, and it
+  stringified whole messages: on a real 500k-token session it read 496,861
+  tokens against a billed prefill of 159,057. Router decisions that weigh
+  context size now use the corrected count.
+- A model whose catalog entry is all zeros (a flat-rate pool) is no longer
+  treated as having no prices. Depends on `@231self/opencode-shared` `^0.1.3`
+  for `costState`.
+
 ## 0.3.4 — 2026-11-23
 
 ### Changed

@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.1.5 — 2026-11-23
+
+### Fixed
+
+- The report no longer prints economics it did not compute. A model with no
+  usable prices produced `per turn $0.0000`, `break-even never turns`,
+  `worth it no` and `summary cost $0.0000 (estimated)` — placeholders that
+  read as results — and silently dropped the `horizons` section. The report
+  now distinguishes a flat-rate plan (`flat plan · $0 marginal`, no cost
+  savings) from missing data (`no price data · not computed`, `worth it
+  unknown`), and always renders the horizons, saying why a row has no number.
+- The context size comes from the prompt the provider billed
+  (`input + cache.read + cache.write` of the newest request) whenever a
+  request has run since the last compaction, and from the message estimate
+  otherwise. `/ctx` shows which. A request's billed prefill is the only
+  authoritative size; counting messages measures parts the host prunes.
+- A prediction is recorded only for a compaction observed as it happens. A
+  checkpoint first noticed after a restart or an install used the context as
+  it stands now as the "post-compaction" size, which is how a session that had
+  grown for two days recorded a 2,352% phantom prediction error. The summary
+  size is still learned either way.
+- Predicted and actual compacted sizes are on one scale, so a prediction error
+  now measures the compacted-size model rather than a unit mismatch.
+
+### Changed
+
+- `/ctx` opens with a `context` section: current size, growth, and the source
+  (`billed` or `estimated`).
+- `summary cost` and `rebuild` say `modelled` when they are modelled from
+  prices. They claimed `estimated` and `modelled` respectively for the same
+  situation.
+- Depends on `@231self/opencode-shared` `^0.1.3`.
+
 ## 0.1.4 — 2026-11-23
 
 ### Fixed

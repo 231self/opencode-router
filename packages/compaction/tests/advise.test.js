@@ -153,11 +153,53 @@ test("without calibration the summary size and costs are explicitly assumed", as
   expect(advisory.estimates).toMatchObject({
     summaryTokens: 1200,
     summarySource: "assumed",
-    summaryCostSource: "estimated",
+    summaryCostSource: "modelled",
     rebuildCost: null,
     rebuildSource: "modelled",
+    pricing: "priced",
   })
   expect(advisory.estimates.summaryCost).toBeGreaterThan(0)
+})
+
+test("a flat-rate pool states no economics instead of inventing zeros", async () => {
+  // xiaomi-token-plan-sgp/mimo-v2.6-pro publishes an all-zero cost entry.
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, horizons: [3, 8, 15] }, pin: { cacheHitRatio: 0.8 } },
+    model: {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 262144, output: 8192 },
+    },
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    estimatedTokens: 100_000,
+    previousTokens: 60_000,
+  })
+  expect(advisory.pricing).toBe("flat")
+  expect(advisory.breakEvenTurns).toBeNull()
+  expect(advisory.perTurnSavings).toBeNull()
+  expect(advisory.worthIt).toBeNull()
+  expect(advisory.estimates.summaryCost).toBeNull()
+  expect(advisory.estimates.summaryCostSource).toBe("flat plan ($0 marginal)")
+  // The horizons survive uncomputed rather than disappearing from the report.
+  expect(advisory.projections.map((entry) => entry.turns)).toEqual([3, 8, 15])
+  expect(advisory.projections.every((entry) => entry.worthIt === null)).toBe(true)
+})
+
+test("a model with no price entry is unknown, not free", async () => {
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, horizons: [3, 8] }, pin: { cacheHitRatio: 0.8 } },
+    model: { providerID: "openai", id: "gpt-6.2-sol", cost: [], limit: { context: 262144 } },
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    estimatedTokens: 100_000,
+    previousTokens: 60_000,
+  })
+  expect(advisory.pricing).toBe("unknown")
+  expect(advisory.worthIt).toBeNull()
+  expect(advisory.estimates.summaryCostSource).toBe("no price data")
+  expect(advisory.estimates.rebuildSource).toBe("no price data")
 })
 
 test("missing prices never veto the structural verdict", async () => {

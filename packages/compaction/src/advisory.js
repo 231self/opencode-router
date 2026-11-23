@@ -22,10 +22,13 @@ export function normaliseHorizons(value) {
  * verdict's own economics.
  */
 export function projectHorizons(roi, horizons = DEFAULT_HORIZONS) {
-  if (!roi) return []
+  const list = normaliseHorizons(horizons)
+  // Without prices the table is not empty, it is uncomputed. Keeping the rows
+  // means the report never drops a section without saying why.
+  if (!roi) return list.map((turns) => ({ turns, net: null, worthIt: null }))
   const savings = Number(roi.perTurnSavings) || 0
   const premium = Number(roi.invalidationCost) || 0
-  return normaliseHorizons(horizons).map((turns) => {
+  return list.map((turns) => {
     const net = savings * turns - premium
     return {
       turns,
@@ -72,6 +75,7 @@ export function composeAdvisory({
   guard = null,
   instability = 0,
   baseCooldown = 3,
+  pricing = null,
   cache = null,
   projections = [],
   estimates = null,
@@ -108,9 +112,12 @@ export function composeAdvisory({
     verdict,
     confidence,
     source,
-    breakEvenTurns: roi?.breakEvenTurns ?? Infinity,
-    perTurnSavings: roi?.perTurnSavings ?? 0,
-    worthIt: roi?.worthIt ?? false,
+    // Null when the economics layer did not run. The report has to say "not
+    // computed" rather than print a break-even the code refused to invent.
+    breakEvenTurns: roi ? roi.breakEvenTurns : null,
+    perTurnSavings: roi ? roi.perTurnSavings : null,
+    worthIt: roi ? roi.worthIt : null,
+    pricing: pricing ?? (roi ? "priced" : "unknown"),
     cache: cache ?? { ratio: 0, samples: 0, source: "none" },
     projections,
     estimates: estimates ?? null,

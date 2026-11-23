@@ -164,6 +164,30 @@ export function normaliseCost(cost) {
 }
 
 /**
+ * Whether a model's prices can support a cost decision.
+ *
+ * Three states, not two. A pool that publishes explicit zeros is a flat-rate
+ * plan whose marginal token cost really is $0; a catalog with no entry at all
+ * is simply unknown. Collapsing the two into "free" would claim a conclusion
+ * the data does not support.
+ */
+export function costState(tiers) {
+  const list = Array.isArray(tiers) ? tiers : []
+  if (list.length === 0) return "unknown"
+  let priced = false
+  let explicitZero = false
+  for (const tier of list) {
+    for (const value of [tier?.input, tier?.output, tier?.cache?.read, tier?.cache?.write]) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue
+      if (value > 0) priced = true
+      else if (value === 0) explicitZero = true
+    }
+  }
+  if (priced) return "priced"
+  return explicitZero ? "flat" : "unknown"
+}
+
+/**
  * Where a pool model's displayed prices came from: the host catalog, the
  * models.dev fallback, or nowhere.
  */

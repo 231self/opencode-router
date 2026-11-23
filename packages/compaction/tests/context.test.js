@@ -499,6 +499,99 @@ test("the active session context is measured instead of the hook segment", async
   expect(pin.compaction.advisory.verdict).toBe("uncertain")
 })
 
+test("a checkpoint that was not observed shrinking records no phantom prediction", async () => {
+  const env = tempEnv()
+  const now = 1_800_000_000_000
+  const usage = new UsageTracker({ env, now: () => now })
+  usage.noteStepStart({ sessionID: "ses_1", model: MODELS[0], at: now - 1_000 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 5_000, output: 800, cache: { read: 0, write: 0 } },
+    at: now - 500,
+  })
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 5_000, afterTokens: 5_000, partsPruned: 0, overflow: false },
+    }),
+  }
+  const { run } = harness({ env, core, usage })
+  // The context is already at the size it settled at. A checkpoint noticed for
+  // the first time here is old history — the same case that recorded a 2,352%
+  // phantom error on a session which had grown for two days after compaction.
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 5_000 },
+    env,
+  )
+  await run({
+    sessionID: "ses_1",
+    model: MODELS[0],
+    system: [],
+    messages: [
+      {
+        type: "compaction",
+        status: "completed",
+        id: "cp-1",
+        summary: "parser state: ".concat("x".repeat(400)),
+        model: { providerID: "anthropic", id: "claude-opus-5-5" },
+        tokens: { input: 100_000, output: 800, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
+    ],
+  })
+  const entry = readCalibration(env).models["deepseek/deepseek-flash"]
+  // The summary's real size is still learned; only the prediction is withheld.
+  expect(entry.summary.samples).toBe(1)
+  expect(entry.lastPrediction).toBeUndefined()
+})
+
+test("the billed prefill is used once a request runs after the checkpoint", async () => {
+  const env = tempEnv()
+  const now = 1_800_000_000_000
+  const usage = new UsageTracker({ env, now: () => now })
+  usage.noteStepStart({ sessionID: "ses_1", model: MODELS[0], at: now - 100 })
+  usage.noteStepEnd({
+    sessionID: "ses_1",
+    tokens: { input: 40_000, output: 10, cache: { read: 60_000, write: 0 } },
+    at: now - 50,
+  })
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 98_000, afterTokens: 98_000, partsPruned: 0, overflow: false },
+    }),
+  }
+  const { run } = harness({ env, core, usage })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 98_000 },
+    env,
+  )
+  await run({
+    sessionID: "ses_1",
+    model: MODELS[0],
+    system: [],
+    messages: [
+      {
+        type: "compaction",
+        status: "completed",
+        id: "cp-1",
+        time: { created: now - 1_000 },
+        summary: "parser state: ".concat("x".repeat(400)),
+        model: { providerID: "anthropic", id: "claude-opus-5-5" },
+        tokens: { input: 100_000, output: 800, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
+    ],
+  })
+  const pin = readPin("opencode", "ses_1", env)
+  expect(pin.lastContextSource).toBe("billed")
+  expect(pin.lastContextTokens).toBe(100_000)
+})
+
 test("a context write cannot clobber a newer routing pin", async () => {
   const env = tempEnv()
   const core = {

@@ -121,7 +121,12 @@ test("an unprofitable compaction is not worth it at any shown horizon", () => {
   )
   expect(projections.every((entry) => !entry.worthIt)).toBe(true)
   expect(projections[2].net).toBeLessThan(0)
-  expect(projectHorizons(null)).toEqual([])
+  // Uncomputed horizons keep their rows, so the report never drops a section
+  // without saying why.
+  expect(projectHorizons(null, [3, 8])).toEqual([
+    { turns: 3, net: null, worthIt: null },
+    { turns: 8, net: null, worthIt: null },
+  ])
 })
 
 test("negative savings never make a horizon worth it, even with a credit", () => {

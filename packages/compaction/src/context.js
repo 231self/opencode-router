@@ -113,9 +113,29 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     }
 
     if (tokens == null) tokens = countContextTokens(event)
-    const measuredTokens = activeTokens ?? tokens
+    // Two numbers, one report. `estimatedTokens` is the message counter;
+    // `measuredTokens` is the prompt the provider billed, which is what the
+    // cost arithmetic and the context pressure must be driven by.
+    const estimatedTokens = activeTokens ?? tokens
     const tailMessages = activeMessages ?? event.messages ?? []
+    const checkpoint = checkpointOf(tailMessages)
+    const billed = usage?.lastPrefill ? usage.lastPrefill({ sessionID, model: refOf(model) }) : null
+    // A step's billed prefill measures the context as of that request. The
+    // summary request that produced a checkpoint saw the *pre*-compaction
+    // context, so only a request that ran after the checkpoint may stand in.
+    // A checkpoint with no timestamp leaves the ordering unprovable, and the
+    // estimate is the safer fallback.
+    const checkpointAt = checkpoint?.time?.created
+    const billedIsCurrent = Boolean(
+      billed &&
+        (checkpointAt == null
+          ? checkpoint == null
+          : Number(billed.at) >= Number(checkpointAt)),
+    )
+    const measuredTokens = billedIsCurrent ? billed.prefill : estimatedTokens
+    const contextSource = billedIsCurrent ? "billed" : "estimated"
     const latest = readPin(host, sessionID, env) ?? {}
+    const previousTokens = Number(latest.lastContextTokens) || 0
     const target = refOf(model)
     // A newer prompt may have chosen a different model while this hook was
     // measuring. Never overwrite that decision with stale context state.
@@ -132,7 +152,6 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     let checkpointID = String(
       calibration?.sessions?.[hash]?.checkpoint ?? latest.compaction?.checkpoint ?? "",
     )
-    const checkpoint = checkpointOf(tailMessages)
     const rebuild = checkpointID && usage ? usage.peekRebuild(sessionID) : null
     const usableRebuild = Boolean(rebuild?.tokens && rebuild.checkpoint === checkpointID)
     const alreadyCalibrated = Boolean(
@@ -177,17 +196,29 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
               const saved = latest.compaction?.advisory?.estimates
               const savedPrediction =
                 saved?.predictedModel === targetKey ? Number(saved?.predictedTotal) : NaN
-              next = recordObservation(next, {
-                model: target,
-                kind: "prediction",
-                value: {
-                  predicted:
-                    Number.isFinite(savedPrediction) && savedPrediction > 0
-                      ? savedPrediction
-                      : systemTokens + predictedSummary + tail,
-                  actual: measuredTokens,
-                },
-              })
+              // A prediction is only worth recording for a compaction observed
+              // as it happens. A checkpoint first noticed after a restart or an
+              // install is old history: its "post-compaction size" would be the
+              // context as it stands now, and a session that had grown for two
+              // days recorded a 2,352% phantom error that way.
+              const observedBefore = previousTokens > 0
+              const shrank = measuredTokens < previousTokens
+              if (observedBefore && shrank) {
+                const fallbackShape = systemTokens + predictedSummary + tail
+                next = recordObservation(next, {
+                  model: target,
+                  kind: "prediction",
+                  value: {
+                    predicted:
+                      Number.isFinite(savedPrediction) && savedPrediction > 0
+                        ? savedPrediction
+                        : estimatedTokens > 0
+                          ? measuredTokens * (fallbackShape / estimatedTokens)
+                          : fallbackShape,
+                    actual: measuredTokens,
+                  },
+                })
+              }
               next = recordObservation(next, { model: target, kind: "summary", value: summaryText })
             }
             next = recordObservation(next, { model: target, kind: "compaction" })
@@ -257,8 +288,9 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
           model,
           messages: event.messages ?? [],
           measuredTokens,
+          estimatedTokens,
           tailMessages,
-          previousTokens: Number(latest.lastContextTokens) || 0,
+          previousTokens,
           systemTokens,
           guard: latest.compaction ?? null,
           judge,
@@ -320,6 +352,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       Number(fresh.lastContextTokens) === Number(latest.lastContextTokens)
     ) {
       next.lastContextTokens = measuredTokens
+      next.lastContextSource = contextSource
     }
     writePin(host, sessionID, next, env)
   } catch {

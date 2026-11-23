@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { costSource, mergeCost, normaliseCost, tiersOf, modelledTurnCost } from "../src/cost.js"
+import { costSource, costState, mergeCost, normaliseCost, tiersOf, modelledTurnCost } from "../src/cost.js"
 
 const CATALOG = [{ input: 0.15, output: 0.6, cache: { read: 0.003, write: 0 } }]
 
@@ -164,4 +164,18 @@ test("modelledTurnCost clamps the ratio and tolerates missing prices", () => {
   expect(
     modelledTurnCost({ price: {}, inputTokens: 100, prefixTokens: 100, cacheHitRatio: 0.8, outputTokens: 50 }),
   ).toBe(0)
+})
+
+test("a pool that publishes zeros is a flat plan, not a priced model", () => {
+  // xiaomi-token-plan-sgp/mimo-v2.6-pro reports exactly this shape.
+  expect(costState([{ input: 0, output: 0, cache: { read: 0, write: 0 } }])).toBe("flat")
+  expect(costState([{ input: 0.435, output: 0.87, cache: { read: 0.0036, write: 0 } }])).toBe("priced")
+  expect(costState([{ input: 0, output: 0.87 }])).toBe("priced")
+})
+
+test("a catalog entry that is simply missing is unknown, not free", () => {
+  // openai/gpt-6.2-sol reports `cost: []`; the two states must not collapse.
+  expect(costState([])).toBe("unknown")
+  expect(costState(undefined)).toBe("unknown")
+  expect(costState([{ input: undefined, output: undefined, cache: {} }])).toBe("unknown")
 })

@@ -58,19 +58,36 @@ first measurement.
 
 The decision horizon stays `expectedTurns`, but `/ctx` also shows the same
 economics at 3, 8, and 15 turns (`horizons`), so you can see where the answer
-flips instead of guessing when the session ends. Context size comes from the
-active session (`ctx.session.context`), not just the outgoing request segment.
+flips instead of guessing when the session ends.
+
+Context size comes from the prompt the provider billed — `input +
+cache.read + cache.write` on the newest request — whenever a request has run
+since the last compaction. Counting messages measures parts the host prunes
+from the request, so the message estimate is only the fallback, and `/ctx`
+says which one it is showing.
+
+Cost economics need real prices, and not every model has them. `/ctx` keeps
+three cases apart instead of printing the same numbers for all of them:
+`priced` computes break-even turns and per-turn savings, a flat-rate pool
+whose catalog entry is all zeros is shown as `flat plan · $0 marginal` (no
+cost savings), and a model with no price entry is shown as `no price data`
+with `worth it unknown`. A break-even is never stated when it was not
+computed.
 
 The compacted size and the one-time cost are calibrated from real compactions.
-After each checkpoint the plugin compares its prediction with the context the
-host actually sent and uses the rolling observed size. The first
-post-compaction turn's reported reads, writes, and misses replace the modelled
-rebuild cost. The summary request is measured from the completed checkpoint's
+After a compaction the plugin observed as it happened, it compares its
+prediction with the size that actually followed and keeps the rolling error. A
+checkpoint first noticed after a restart is old history and records no
+prediction: using the context as it stands now as the "post-compaction" size
+produced a 2,352% phantom error on a session that had grown for two days.
+The first post-compaction turn's reported reads, writes, and misses replace the
+modelled rebuild cost. The summary request is measured from the completed checkpoint's
 own token usage and model when OpenCode supplies them; otherwise its cost is
 estimated from the context it had to read and the summary it produced.
 
-**`/ctx`** in the TUI shows the current verdict with its numbers and what to
-do about it. **`/ctx here`** asks the host to compact this session; the
+**`/ctx`** in the TUI opens with the current context size and growth, then the
+verdict with its numbers and what to do about it. **`/ctx here`** asks the
+host to compact this session; the
 request clears itself even if the host refuses. OpenCode already has its own
 `/compact`; this plugin leaves that command alone and does not register a
 `compact` alias.

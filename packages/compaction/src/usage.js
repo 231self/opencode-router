@@ -232,6 +232,24 @@ export class UsageTracker {
   }
 
   /**
+   * The billed prefill of the newest reported request: `input + cache.read +
+   * cache.write` is exactly the prompt the provider charged for.
+   *
+   * This is the only authoritative context size. Counting messages measures
+   * more than the host sends — it sees parts the request prunes — so the
+   * estimate is the fallback, never the preference.
+   */
+  lastPrefill({ sessionID, model } = {}) {
+    const steps = this.stepsFor({ sessionID, model })
+    const step = steps[steps.length - 1]
+    const prefill =
+      (Number(step?.tokens?.input) || 0) +
+      (Number(step?.tokens?.read) || 0) +
+      (Number(step?.tokens?.write) || 0)
+    return prefill > 0 ? { prefill, at: Number(step?.at) || 0, model: step?.model ?? null } : null
+  }
+
+  /**
    * The ratio to price with, plus where it came from:
    * `measured`, `expired`, or `fallback`.
    */

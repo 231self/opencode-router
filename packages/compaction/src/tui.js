@@ -34,6 +34,11 @@ function percent(value) {
   return `${number < 0 ? "-" : "+"}${Math.round(Math.abs(number) * 100)}%`
 }
 
+function sign(value) {
+  const number = Math.round(Number(value) || 0)
+  return `${number < 0 ? "-" : "+"}${Math.abs(number)}`
+}
+
 /** The advisory popup body: one fact per row, 72 columns, hanging indent. */
 export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   const state = pin?.compaction ?? null
@@ -60,46 +65,71 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
             : "none"
   const projections = Array.isArray(advisory.projections) ? advisory.projections : []
   const estimates = advisory.estimates ?? null
+  // Three pricing states. `priced` computed real economics; `flat` is a
+  // flat-rate plan whose marginal token cost is genuinely $0; `unknown` has no
+  // price data at all. Only `priced` may state a break-even.
+  const pricing =
+    advisory.pricing ??
+    estimates?.pricing ??
+    // A pin written before this field existed still says what it computed.
+    (advisory.worthIt == null ? "unknown" : "priced")
+  const priced = pricing === "priced"
+  const unpricedLine = pricing === "flat" ? "flat plan · $0 net" : "not computed · no price data"
+  const contextSource = pin?.lastContextSource === "billed" ? "billed" : "estimated"
+  const horizonRows =
+    projections.length > 0
+      ? projections.map((entry) => [
+          `${entry.turns} turns`,
+          entry.worthIt == null
+            ? unpricedLine
+            : `${entry.worthIt ? "worth it" : "not yet"} · ${signedDollars(entry.net)} net`,
+        ])
+      : [["all", unpricedLine]]
   return join(
+    section("context", [
+      ["size", `${Math.round(Number(advisory.signals?.contextTokens) || 0)} tokens (${contextSource})`],
+      ["growth", `${sign(Math.round(Number(advisory.signals?.growth) || 0))} tokens`],
+    ]),
     section("advisory", [
       ["verdict", advisory.verdict],
       ["source", advisory.source],
       ["confidence", (Number(advisory.confidence) || 0).toFixed(2)],
     ]),
-    section("economics", [
-      ["break-even", `${turns(advisory.breakEvenTurns)} turns`],
-      ["per turn", dollars(advisory.perTurnSavings)],
-      ["horizon", `${expectedTurns} turns`],
-      ["worth it", advisory.worthIt ? "yes" : "no"],
-    ]),
+    section(
+      "economics",
+      priced
+        ? [
+            ["break-even", `${turns(advisory.breakEvenTurns)} turns`],
+            ["per turn", dollars(advisory.perTurnSavings)],
+            ["horizon", `${expectedTurns} turns`],
+            ["worth it", advisory.worthIt ? "yes" : "no"],
+          ]
+        : [
+            ["basis", pricing === "flat" ? "flat plan · $0 marginal" : "no price data · not computed"],
+            ["horizon", `${expectedTurns} turns`],
+            ["worth it", pricing === "flat" ? "no cost savings" : "unknown"],
+          ],
+    ),
     section("cache", [
       ["hit rate", source === "none" ? "unknown" : `${Math.round(ratio * 100)}%`],
       ["source", source],
       ["samples", String(Number(cache.samples) || 0)],
     ]),
-    ...(projections.length > 0
-      ? [
-          section(
-            "horizons",
-            projections.map((entry) => [
-              `${entry.turns} turns`,
-              `${entry.worthIt ? "worth it" : "not yet"} · ${signedDollars(entry.net)} net`,
-            ]),
-          ),
-        ]
-      : []),
+    section("horizons", horizonRows),
     ...(estimates
       ? [
           section("estimation", [
             ["summary", `${Math.round(Number(estimates.summaryTokens) || 0)} tokens (${estimates.summarySource})`],
             [
               "summary cost",
-              `${dollars(estimates.summaryCost)} (${estimates.summaryCostSource})`,
+              estimates.summaryCost == null
+                ? String(estimates.summaryCostSource ?? "not computed")
+                : `${dollars(estimates.summaryCost)} (${estimates.summaryCostSource})`,
             ],
             [
               "rebuild",
               estimates.rebuildCost == null
-                ? "modelled"
+                ? String(estimates.rebuildSource ?? "not computed")
                 : `${dollars(estimates.rebuildCost)} (${estimates.rebuildSource})`,
             ],
             ...(estimates.lastPrediction
@@ -124,8 +154,14 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
       advisory.verdict === "delegate"
         ? "The next step looks like review or verification. Send it to a fresh subagent; a reviewer without this session's history usually judges the work better."
         : advisory.verdict === "compact-now"
-          ? "Compaction pays for itself soon. Run /ctx here to compact at the recommended checkpoint."
-          : "Keep working. There is no safe checkpoint yet, or compaction would not pay for itself within the horizon.",
+          ? priced
+            ? "Compaction pays for itself soon. Run /ctx here to compact at the recommended checkpoint."
+            : "This looks like a safe checkpoint. Run /ctx here to compact. Compaction economics were not computed for this model."
+          : pricing === "priced"
+            ? "Keep working. There is no safe checkpoint yet, or compaction would not pay for itself within the horizon."
+            : pricing === "flat"
+              ? "Keep working. There is no safe checkpoint yet. This is a flat plan, so compaction saves no money either way."
+              : "Keep working. There is no safe checkpoint yet. Compaction economics were not computed: this model has no price data.",
     ),
   )
 }

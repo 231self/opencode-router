@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { cacheHitShare, countContextTokens, estimateTokens } from "../src/tokens.js"
+import { cacheHitShare, contextMessageTokens, countContextTokens, estimateTokens } from "../src/tokens.js"
 
 import { RECORDED_PRICES as PRICES, RECORDED_TURN as TURN } from "./fixtures.js"
 
@@ -42,4 +42,31 @@ test("a completed compaction checkpoint counts its summary", () => {
     ],
   })
   expect(compacted - plain).toBe(estimateTokens(summary) + 16)
+})
+
+test("the active-context counter counts prompt content, not reasoning or metadata", () => {
+  const message = {
+    type: "assistant",
+    content: [
+      { type: "text", text: "here is the answer" },
+      {
+        type: "reasoning",
+        text: "thinking it through ".repeat(400),
+        native: { reasoningEncryptedContent: "A".repeat(4000) },
+      },
+      { type: "tool", tool: "bash", state: { status: "completed", output: "ok".repeat(200), input: {} } },
+    ],
+    // Host bookkeeping the provider never bills as prompt.
+    snapshot: { id: "snap", body: "z".repeat(2000) },
+    tokens: { input: 1, output: 2, cache: { read: 3 } },
+    time: { created: 1_800_000_000_000 },
+  }
+  const prompt =
+    estimateTokens("here is the answer") +
+    estimateTokens("ok".repeat(200)) +
+    estimateTokens("{}") +
+    16
+  expect(contextMessageTokens(message)).toBe(prompt)
+  // Stringifying the whole message counted reasoning and metadata as prompt.
+  expect(prompt).toBeLessThan(300)
 })

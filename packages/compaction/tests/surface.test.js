@@ -164,6 +164,71 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
   expect(report).toContain("12%")
 })
 
+test("an unpriced model never shows invented money in the report", () => {
+  const pin = {
+    lastContextSource: "billed",
+    compaction: {
+      verdict: "not-yet",
+      turns: 76,
+      changedTurns: 1,
+      advisory: {
+        verdict: "not-yet",
+        source: "deterministic",
+        confidence: 0.7,
+        breakEvenTurns: null,
+        perTurnSavings: null,
+        worthIt: null,
+        pricing: "flat",
+        cache: { ratio: 0.95, samples: 5, source: "measured" },
+        signals: { contextTokens: 241798, growth: 0 },
+        estimates: {
+          summaryTokens: 2584,
+          summarySource: "measured",
+          pricing: "flat",
+          summaryCost: null,
+          summaryCostSource: "flat plan ($0 marginal)",
+          rebuildCost: null,
+          rebuildSource: "flat plan ($0 marginal)",
+          lastPrediction: { predicted: 5664, actual: 7154, error: 0.263 },
+          predictionError: 0.263,
+        },
+        projections: [
+          { turns: 3, net: null, worthIt: null },
+          { turns: 8, net: null, worthIt: null },
+          { turns: 15, net: null, worthIt: null },
+        ],
+      },
+    },
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
+  for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+  // No placeholder money, and no break-even the code refused to compute.
+  expect(report).not.toContain("$0.0000")
+  expect(report).not.toContain("never turns")
+  expect(report).not.toContain("modelled")
+  expect(report).toContain("flat plan")
+  // The horizons section survives, saying why it has no numbers.
+  expect(report).toContain("horizons")
+  expect(report).toContain("3 turns")
+  expect(report).toContain("$0 net")
+  // The context size and where it came from are the first thing shown.
+  expect(report).toContain("241798 tokens (billed)")
+
+  // No price data at all is a different claim from a flat plan, and the
+  // report says so instead of repeating the flat answer.
+  const unknown = JSON.parse(JSON.stringify(pin))
+  unknown.compaction.advisory.pricing = "unknown"
+  unknown.compaction.advisory.estimates.pricing = "unknown"
+  unknown.compaction.advisory.estimates.summaryCostSource = "no price data"
+  unknown.compaction.advisory.estimates.rebuildSource = "no price data"
+  const unpriced = advisoryReport(unknown, { noise: { instability: 0 }, expectedTurns: 8 })
+  for (const line of unpriced.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+  expect(unpriced).toContain("not computed")
+  expect(unpriced).toContain("no price data")
+  expect(unpriced).not.toContain("$0.0000")
+  expect(unpriced).toContain("worth it     unknown")
+})
+
 test("an empty advisory explains itself instead of inventing numbers", () => {
   const report = advisoryReport(null, {})
   expect(report).toContain("No advisory yet")
