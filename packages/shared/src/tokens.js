@@ -45,6 +45,47 @@ export function countContextTokens({ system, messages } = {}) {
   return total
 }
 
+/**
+ * Tokens for one V2 active-context message, or null when the message shape is
+ * not recognized. Shared by `measureSessionContext` and the compaction tail
+ * estimator so both count the same message once.
+ */
+export function contextMessageTokens(message) {
+  const { type, text, content, files, skills, command, output } = message ?? {}
+  switch (type) {
+    case "compaction":
+      if (
+        message.status !== "completed" ||
+        typeof message.summary !== "string" ||
+        !message.summary.trim() ||
+        message.native != null
+      ) {
+        return null
+      }
+      return estimateTokens(message.summary) + 16
+    case "user":
+    case "synthetic":
+    case "system":
+    case "skill":
+    case "assistant":
+    case "shell":
+      // Unresolved attachments can expand to an unknown size.
+      if (files?.length || skills?.length) return null
+      return (
+        estimateTokens(
+          JSON.stringify({ text, content, command, output, native: message.native }),
+        ) + 16
+      )
+    case "model-switched":
+    case "agent-switched":
+    case "location-switched":
+    case "idle":
+      return 0
+    default:
+      return null
+  }
+}
+
 /** Measure a V2 active-context response without counting message metadata. */
 export function measureSessionContext(response) {
   const messages = Array.isArray(response) ? response : response?.data
@@ -52,32 +93,10 @@ export function measureSessionContext(response) {
   let tokens = 0
   let checkpoint = null
   for (const message of messages) {
-    const { type, text, content, files, skills, command, output } = message ?? {}
-    switch (type) {
-      case "compaction":
-        checkpoint = message
-        if (message.status !== "completed" || typeof message.summary !== "string" ||
-            !message.summary.trim() || message.native != null) return null
-        tokens += estimateTokens(message.summary) + 16
-        break
-      case "user":
-      case "synthetic":
-      case "system":
-      case "skill":
-      case "assistant":
-      case "shell":
-        // Unresolved attachments can expand to an unknown size.
-        if (files?.length || skills?.length) return null
-        tokens += estimateTokens(JSON.stringify({ text, content, command, output, native: message.native })) + 16
-        break
-      case "model-switched":
-      case "agent-switched":
-      case "location-switched":
-      case "idle":
-        break
-      default:
-        return null
-    }
+    const count = contextMessageTokens(message)
+    if (count === null) return null
+    if (message?.type === "compaction") checkpoint = message
+    tokens += count
   }
   return { tokens, checkpoint }
 }

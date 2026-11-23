@@ -1,5 +1,5 @@
 import { compactionRoi, modelledTurnCost, normaliseCost, tierAt } from "@231self/opencode-shared/cost.js"
-import { partTokens } from "@231self/opencode-shared/tokens.js"
+import { contextMessageTokens, partTokens } from "@231self/opencode-shared/tokens.js"
 
 import { composeAdvisory, guardAllows, normaliseHorizons, projectHorizons } from "./advisory.js"
 import { bucketCost, calibrationFor } from "./calibration.js"
@@ -25,6 +25,7 @@ export async function advise({
   config = {},
   model = null,
   messages = [],
+  tailMessages = null,
   measuredTokens = 0,
   previousTokens = 0,
   systemTokens = 0,
@@ -65,7 +66,7 @@ export async function advise({
   // The system prompt survives a compaction, so it belongs on both sides of
   // the comparison; the summary and the recent tail are what change.
   const system = Math.max(0, Number(systemTokens) || 0)
-  const tail = tailTokens(messages)
+  const tail = tailTokens(tailMessages ?? messages)
   const compactedTokens = system + summaryTokens + tail
   const summaryMeasured = Number(calibrated?.summary?.samples) > 0
   const requestMeasured = Number(calibrated?.request?.samples) > 0
@@ -201,6 +202,10 @@ function meanBucketCost(tiers, entry, { output = true } = {}) {
 export function tailTokens(messages) {
   const plain = (messages ?? []).filter((message) => message?.type !== "compaction")
   return plain.slice(-2).reduce((total, message) => {
+    if (message?.type && !Array.isArray(message.parts)) {
+      const count = contextMessageTokens(message)
+      return total + (count == null ? 0 : count)
+    }
     const parts = message?.parts ?? []
     return total + parts.reduce((sum, part) => sum + partTokens(part), 0)
   }, 0)

@@ -1,6 +1,10 @@
 import { readPin, sessionHash, writePin } from "@231self/opencode-shared/state.js"
 import { sameModel, refOf } from "@231self/opencode-shared/refs.js"
-import { countContextTokens, estimateTokens } from "@231self/opencode-shared/tokens.js"
+import {
+  countContextTokens,
+  estimateTokens,
+  measureSessionContext,
+} from "@231self/opencode-shared/tokens.js"
 
 import { advise, tailTokens } from "./advise.js"
 import {
@@ -69,6 +73,20 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     const sessionID = event?.sessionID
     if (!sessionID) return
     await honorCompactRequest({ host, env, ctx, sessionID })
+    let activeMessages = null
+    let activeTokens = null
+    try {
+      const active = await ctx?.session?.context?.({ sessionID })
+      if (Array.isArray(active)) {
+        const measured = measureSessionContext(active)
+        if (measured) {
+          activeMessages = active
+          activeTokens = measured.tokens
+        }
+      }
+    } catch {
+      // The hook's own messages remain the fallback measurement.
+    }
     const model = await modelFor(ctx, event?.model)
     let tokens = null
     let optimiser = null
@@ -95,6 +113,8 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     }
 
     if (tokens == null) tokens = countContextTokens(event)
+    const measuredTokens = activeTokens ?? tokens
+    const tailMessages = activeMessages ?? event.messages ?? []
     const latest = readPin(host, sessionID, env) ?? {}
     const target = refOf(model)
     // A newer prompt may have chosen a different model while this hook was
@@ -112,7 +132,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     let checkpointID = String(
       calibration?.sessions?.[hash]?.checkpoint ?? latest.compaction?.checkpoint ?? "",
     )
-    const checkpoint = checkpointOf(event.messages)
+    const checkpoint = checkpointOf(tailMessages)
     const rebuild = checkpointID && usage ? usage.peekRebuild(sessionID) : null
     const usableRebuild = Boolean(rebuild?.tokens && rebuild.checkpoint === checkpointID)
     const alreadyCalibrated = Boolean(
@@ -123,7 +143,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       target &&
       (usableRebuild || (checkpoint?.id && !alreadyCalibrated))
     ) {
-      const tail = tailTokens(event.messages)
+      const tail = tailTokens(tailMessages)
       let committed = null
       try {
         committed = updateCalibration(env, (doc) => {
@@ -165,7 +185,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
                     Number.isFinite(savedPrediction) && savedPrediction > 0
                       ? savedPrediction
                       : systemTokens + predictedSummary + tail,
-                  actual: tokens,
+                  actual: measuredTokens,
                 },
               })
               next = recordObservation(next, { model: target, kind: "summary", value: summaryText })
@@ -236,7 +256,8 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
           config,
           model,
           messages: event.messages ?? [],
-          measuredTokens: tokens,
+          measuredTokens,
+          tailMessages,
           previousTokens: Number(latest.lastContextTokens) || 0,
           systemTokens,
           guard: latest.compaction ?? null,
@@ -298,7 +319,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
       !fresh.lastContextTokens ||
       Number(fresh.lastContextTokens) === Number(latest.lastContextTokens)
     ) {
-      next.lastContextTokens = tokens
+      next.lastContextTokens = measuredTokens
     }
     writePin(host, sessionID, next, env)
   } catch {

@@ -41,11 +41,14 @@ function tempEnv() {
   }
 }
 
-function harness({ core, env, usage = null, judge = null }) {
+function harness({ core, env, usage = null, judge = null, sessionContext = null }) {
   const ctx = {
     model: { list: async () => MODELS },
     provider: { list: async () => [] },
-    session: { get: async () => ({ id: "ses_1", agent: "build" }) },
+    session: {
+      get: async () => ({ id: "ses_1", agent: "build" }),
+      ...(sessionContext ? { context: async () => sessionContext } : {}),
+    },
     agent: { get: async () => ({ id: "build", mode: "primary" }) },
   }
   return {
@@ -466,6 +469,34 @@ test("an opaque or empty checkpoint is counted but not learned", async () => {
   expect(entry.lastPrediction).toBeUndefined()
   expect(entry.compactions).toBe(1)
   expect(entry.request.samples).toBe(1)
+})
+
+test("the active session context is measured instead of the hook segment", async () => {
+  const env = tempEnv()
+  const sessionContext = [{ type: "assistant", text: "x".repeat(120_000) }]
+  const core = {
+    optimise: () => ({
+      plan: [],
+      stats: { beforeTokens: 10, afterTokens: 10, partsPruned: 0, overflow: false },
+    }),
+  }
+  const { run } = harness({ env, core, sessionContext })
+  writePin(
+    "opencode",
+    "ses_1",
+    { model: { providerID: "deepseek", id: "deepseek-flash" }, lastContextTokens: 0 },
+    env,
+  )
+  await run({
+    sessionID: "ses_1",
+    model: MODELS[0],
+    system: [],
+    messages: [{ info: { role: "user" }, parts: [{ type: "text", text: "go" }] }],
+  })
+  const pin = readPin("opencode", "ses_1", env)
+  expect(pin.lastContextTokens).toBeGreaterThan(25_000)
+  expect(pin.compaction.advisory.signals.contextTokens).toBe(pin.lastContextTokens)
+  expect(pin.compaction.advisory.verdict).toBe("uncertain")
 })
 
 test("a context write cannot clobber a newer routing pin", async () => {
