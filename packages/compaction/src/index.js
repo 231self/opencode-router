@@ -3,7 +3,7 @@ import { JudgeClient } from "@231self/opencode-shared/judge-client.js"
 import { createKiloContext } from "@231self/opencode-shared/kilo.js"
 import { refOf } from "@231self/opencode-shared/refs.js"
 
-import { contextMessages, runContext } from "./context.js"
+import { contextMessages, honorCompactRequest, runContext } from "./context.js"
 import { UsageTracker } from "./usage.js"
 import { VERSION } from "./version.js"
 import { loadCore } from "./wasm.js"
@@ -77,6 +77,16 @@ export default {
                 tokens: data.tokens,
                 at,
                 assistantMessageID: data.assistantMessageID,
+              })
+              // The host runs an admitted compaction "at the next step
+              // boundary", and this is that boundary. Honoring a `/ctx here`
+              // here as well as in the request hook means the request is not
+              // tied to the timing of an in-flight request.
+              void honorCompactRequest({
+                host: "opencode",
+                env: process.env,
+                ctx,
+                sessionID: data.sessionID,
               })
             }
           }

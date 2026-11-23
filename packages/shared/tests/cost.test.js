@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { costSource, costState, mergeCost, normaliseCost, tiersOf, modelledTurnCost } from "../src/cost.js"
+import { costSource, costState, mergeCost, normaliseCost, referencePrice, tiersOf, modelledTurnCost } from "../src/cost.js"
 
 const CATALOG = [{ input: 0.15, output: 0.6, cache: { read: 0.003, write: 0 } }]
 
@@ -178,4 +178,37 @@ test("a catalog entry that is simply missing is unknown, not free", () => {
   expect(costState([])).toBe("unknown")
   expect(costState(undefined)).toBe("unknown")
   expect(costState([{ input: undefined, output: undefined, cache: {} }])).toBe("unknown")
+})
+
+test("a flat pool finds a priced sibling for the same model ID", () => {
+  const catalog = [
+    {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+    },
+    {
+      providerID: "xiaomi-token-plan-ams",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+    },
+    {
+      providerID: "xiaomi",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0.435, output: 0.87, cache: { read: 0.0036, write: 0 } }],
+    },
+    {
+      providerID: "opencode",
+      id: "iceman-free",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+    },
+  ]
+  const reference = referencePrice(catalog[0], catalog)
+  expect(reference.providerID).toBe("xiaomi")
+  expect(reference.id).toBe("mimo-v2.6-pro")
+  // The pool's own zero-priced siblings are never a reference for it.
+  expect(referencePrice(catalog[1], catalog).providerID).toBe("xiaomi")
+  // A free tier has no priced sibling and must stay honestly unpriced.
+  expect(referencePrice(catalog[3], catalog)).toBeNull()
+  expect(referencePrice(null, catalog)).toBeNull()
 })

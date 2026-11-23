@@ -16,8 +16,16 @@ function currentSession(context) {
   return undefined
 }
 
+/** A turn count as a noun: `1 turn`, `8 turns`, or `never`. */
 function turns(value) {
-  return Number.isFinite(value) ? String(value) : "never"
+  const number = Number(value)
+  return Number.isFinite(number) ? `${number} turn${number === 1 ? "" : "s"}` : "never"
+}
+
+/** A bare count with a pluralised noun. */
+function count(value, noun) {
+  const number = Math.round(Number(value) || 0)
+  return `${number} ${noun}${number === 1 ? "" : "s"}`
 }
 
 function dollars(value) {
@@ -51,6 +59,9 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
     )
   }
   const held = Math.max(0, (Number(state.turns) || 0) - (Number(state.changedTurns) || 0))
+  // The outcome of the last `/ctx here`. This path used to fail silently, so
+  // the report has to say what the host did with the request.
+  const request = state?.requestedResult ?? null
   const cache = advisory.cache ?? {}
   const ratio = Number(cache.ratio) || 0
   const source =
@@ -66,20 +77,42 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   const projections = Array.isArray(advisory.projections) ? advisory.projections : []
   const estimates = advisory.estimates ?? null
   // Three pricing states. `priced` computed real economics; `flat` is a
-  // flat-rate plan whose marginal token cost is genuinely $0; `unknown` has no
-  // price data at all. Only `priced` may state a break-even.
-  const pricing =
-    advisory.pricing ??
-    estimates?.pricing ??
-    // A pin written before this field existed still says what it computed.
-    (advisory.worthIt == null ? "unknown" : "priced")
-  const priced = pricing === "priced"
-  const unpricedLine = pricing === "flat" ? "flat plan · $0 net" : "not computed · no price data"
+  // flat-rate pool whose list price usually lives in a sibling catalog entry;
+  // `unknown` has no price data at all. Only real prices may state a break-even
+  // as the user's own cost.
+  const pricing = advisory.pricing ?? estimates?.pricing ?? "unknown"
+  const computed = advisory.worthIt != null
+  const atListPrice = Boolean(advisory.moneyBasis)
+  const referenceLabel = advisory.priceSource ?? "no reference price"
+  const capacity = advisory.capacity ?? null
   const contextSource = pin?.lastContextSource === "billed" ? "billed" : "estimated"
+  // A plan makes cost irrelevant but the window finite. When headroom runs
+  // out the advice has to say so, whatever the money says.
+  const headroomShare = capacity?.limit ? capacity.headroom / capacity.limit : null
+  const lowHeadroom = headroomShare != null && headroomShare < 0.15
+  const closing =
+    advisory.verdict === "delegate"
+      ? "The next step looks like review or verification. Send it to a fresh subagent; a reviewer without this session's history usually judges the work better."
+      : advisory.verdict === "compact-now"
+        ? computed
+          ? atListPrice
+            ? "Compaction pays for itself soon at list price. Your plan charges nothing either way. Run /ctx here to compact."
+            : "Compaction pays for itself soon. Run /ctx here to compact at the recommended checkpoint."
+          : "This looks like a safe checkpoint. Run /ctx here to compact. Compaction economics were not computed for this model."
+        : lowHeadroom
+          ? `Keep working — but the window is nearly full: ${Math.round(capacity.headroom)} tokens left. A safe checkpoint may not arrive before you run out. /ctx here compacts now.`
+          : computed
+            ? atListPrice
+              ? "Keep working. There is no safe checkpoint yet. At list price compaction saves money; your plan charges nothing either way."
+              : "Keep working. There is no safe checkpoint yet, or compaction would not pay for itself within the horizon."
+            : pricing === "flat"
+              ? "Keep working. There is no safe checkpoint yet. This is a free tier: cost is not the constraint here, the context window is."
+              : "Keep working. There is no safe checkpoint yet. Compaction economics were not computed: this model has no price data."
+  const unpricedLine = pricing === "flat" ? "flat plan · $0 net" : "not computed · no price data"
   const horizonRows =
     projections.length > 0
       ? projections.map((entry) => [
-          `${entry.turns} turns`,
+          count(entry.turns, "turn"),
           entry.worthIt == null
             ? unpricedLine
             : `${entry.worthIt ? "worth it" : "not yet"} · ${signedDollars(entry.net)} net`,
@@ -88,6 +121,17 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
   return join(
     section("context", [
       ["size", `${Math.round(Number(advisory.signals?.contextTokens) || 0)} tokens (${contextSource})`],
+      ...(capacity?.limit ? [["limit", `${Math.round(capacity.limit)} tokens`]] : []),
+      ...(capacity?.headroom != null && capacity?.limit
+        ? [
+            [
+              "headroom",
+              `${Math.round(capacity.headroom)} tokens (${Math.round(
+                (capacity.headroom / capacity.limit) * 100,
+              )}% free)`,
+            ],
+          ]
+        : []),
       ["growth", `${sign(Math.round(Number(advisory.signals?.growth) || 0))} tokens`],
     ]),
     section("advisory", [
@@ -97,17 +141,35 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
     ]),
     section(
       "economics",
-      priced
+      computed
         ? [
-            ["break-even", `${turns(advisory.breakEvenTurns)} turns`],
-            ["per turn", dollars(advisory.perTurnSavings)],
-            ["horizon", `${expectedTurns} turns`],
-            ["worth it", advisory.worthIt ? "yes" : "no"],
+            ...(atListPrice
+              ? [
+                  ["basis", "flat plan · $0 marginal to you"],
+                  ["priced at", referenceLabel],
+                ]
+              : [["basis", "catalog prices"]]),
+            [
+              "break-even",
+              `${turns(advisory.breakEvenTurns)}${atListPrice ? " (at list price)" : ""}`,
+            ],
+            [
+              "per turn",
+              `${dollars(advisory.perTurnSavings)}${atListPrice ? " (at list price)" : ""}`,
+            ],
+            ["horizon", turns(expectedTurns)],
+            [
+              "worth it",
+              `${advisory.worthIt ? "yes" : "no"}${atListPrice ? " · free on your plan" : ""}`,
+            ],
           ]
         : [
-            ["basis", pricing === "flat" ? "flat plan · $0 marginal" : "no price data · not computed"],
-            ["horizon", `${expectedTurns} turns`],
-            ["worth it", pricing === "flat" ? "no cost savings" : "unknown"],
+            [
+              "basis",
+              pricing === "flat" ? "free tier · $0 marginal" : "no price data · not computed",
+            ],
+            ["horizon", turns(expectedTurns)],
+            ["worth it", pricing === "flat" ? "not a cost decision" : "unknown"],
           ],
     ),
     section("cache", [
@@ -147,22 +209,21 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0 } = {}) {
         ]
       : []),
     section("steady", [
-      ["held for", `${held} turns`],
+      ["held for", count(held, "turn")],
       ["noise band", (Number(noise?.instability) || 0).toFixed(2)],
     ]),
-    note(
-      advisory.verdict === "delegate"
-        ? "The next step looks like review or verification. Send it to a fresh subagent; a reviewer without this session's history usually judges the work better."
-        : advisory.verdict === "compact-now"
-          ? priced
-            ? "Compaction pays for itself soon. Run /ctx here to compact at the recommended checkpoint."
-            : "This looks like a safe checkpoint. Run /ctx here to compact. Compaction economics were not computed for this model."
-          : pricing === "priced"
-            ? "Keep working. There is no safe checkpoint yet, or compaction would not pay for itself within the horizon."
-            : pricing === "flat"
-              ? "Keep working. There is no safe checkpoint yet. This is a flat plan, so compaction saves no money either way."
-              : "Keep working. There is no safe checkpoint yet. Compaction economics were not computed: this model has no price data.",
-    ),
+    ...(request
+      ? [
+          section("last /ctx here", [
+            [
+              "outcome",
+              request.ok ? "accepted" : `failed · ${request.error ?? "unknown error"}`,
+            ],
+            ["via", String(request.via ?? "session.compact")],
+          ]),
+        ]
+      : []),
+    note(closing),
   )
 }
 
@@ -190,7 +251,7 @@ async function runCommand(context, input) {
     await show(
       context,
       prose(
-        "Compaction requested. The next turn asks the host to compact; if it declines, the request is dropped and nothing repeats.",
+        "Compaction requested. The host compacts at the next step boundary. Run /ctx to see whether it was accepted; the request never repeats on its own.",
       ),
     )
     return

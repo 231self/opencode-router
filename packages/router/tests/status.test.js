@@ -46,7 +46,7 @@ test("status reflects pins and the latest decision", () => {
 test("formatStatus always shows the essentials", () => {
   const { env } = tempEnv()
   const text = formatStatus(buildStatus({ host: "opencode", env, core: { abi: 1 } }))
-  expect(text).toContain("opencode-router 0.3.5")
+  expect(text).toContain("opencode-router 0.3.6")
   expect(text).toContain("policy cost")
   expect(text).toMatch(/core\s+ABI 1/)
   expect(text).toMatch(/decision\s+none/)

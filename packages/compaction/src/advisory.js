@@ -76,6 +76,9 @@ export function composeAdvisory({
   instability = 0,
   baseCooldown = 3,
   pricing = null,
+  priceSource = null,
+  moneyBasis = "",
+  capacity = null,
   cache = null,
   projections = [],
   estimates = null,
@@ -99,10 +102,11 @@ export function composeAdvisory({
     source = "guard"
   }
 
-  // Compaction is only advised when it pays. A structural or held
-  // "compact-now" with no payback becomes "not-yet"; "delegate" needs no
-  // economics because it spends nothing on the current context.
-  if (verdict === "compact-now" && roi && !roi.worthIt) {
+  // Compaction is only advised when it pays — against the user's own prices. A
+  // reference price from a sibling catalog entry is a projection, and a
+  // projection must not veto an action whose real marginal cost is zero: on a
+  // flat plan the binding constraint is the context window, not the bill.
+  if (verdict === "compact-now" && roi && !roi.worthIt && !moneyBasis) {
     verdict = "not-yet"
     confidence = Math.min(confidence, 0.6)
     source = source === "guard" ? "guard+economics" : "economics"
@@ -118,6 +122,11 @@ export function composeAdvisory({
     perTurnSavings: roi ? roi.perTurnSavings : null,
     worthIt: roi ? roi.worthIt : null,
     pricing: pricing ?? (roi ? "priced" : "unknown"),
+    priceSource: priceSource ?? null,
+    // Non-empty when the money is a projection at a sibling's list price
+    // rather than the user's own bill.
+    moneyBasis: moneyBasis ?? "",
+    capacity: capacity ?? null,
     cache: cache ?? { ratio: 0, samples: 0, source: "none" },
     projections,
     estimates: estimates ?? null,

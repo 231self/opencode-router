@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4 — 2026-11-23
+
+### Added
+
+- `referencePrice`, the priced sibling entry for the same model ID. A flat-rate
+  pool publishes zeros for a model whose list price lives elsewhere
+  (`xiaomi-token-plan-sgp/mimo-v2.6-pro` vs `xiaomi/mimo-v2.6-pro`), so the
+  cost comparison can still be computed — labelled with the provider it came
+  from, because a sibling's prices are a reference and never the user's bill. A
+  `-free` model has no priced sibling and stays honestly unpriced.
+
 ## 0.1.3 — 2026-11-23
 
 ### Added

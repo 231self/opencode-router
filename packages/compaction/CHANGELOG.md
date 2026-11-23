@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.6 — 2026-11-23
+
+### Added
+
+- Flat-rate plans get real economics instead of a dead end. A plan pool
+  publishes zeros for a model whose list price is in a sibling catalog entry,
+  and 0.1.5 answered `worth it no` for it — which made compaction look
+  pointless on a plan. `/ctx` now computes the comparison at that list price
+  and says so: `priced at list price · xiaomi/mimo-v2.6-pro`, `break-even 1
+  turn (at list price)`, `worth it yes · free on your plan`. A `-free` model
+  with no priced sibling is still shown as `no reference price · $0 marginal`.
+- Capacity in the `context` section: size against the model's limit, headroom
+  and percent free. A plan makes cost irrelevant but the window finite, so
+  when headroom drops below 15% the closing note says the window is nearly
+  full rather than "keep working".
+- `/ctx` reports what the host did with the last `/ctx here` request
+  (`last /ctx here`, `outcome accepted` or `failed · http 409`).
+
+### Fixed
+
+- `/ctx here` no longer fails silently. The request path swallowed every error
+  and skipped the host call without comment when `session.compact` was absent,
+  so it could look broken forever with no way to tell which happened. The
+  outcome is now recorded and shown; only a status code or an error name is
+  persisted, never an error message, which may echo prompt text.
+- A `/ctx here` request is also honored at `session.step.ended`, the step
+  boundary where the host says an admitted compaction runs, instead of only
+  from inside an in-flight request.
+- A projection at a sibling's list price never vetoes a structural
+  `compact-now`. The veto now applies only to the user's own prices: a
+  projection must not block an action whose real marginal cost is zero.
+- `1 turn` instead of `1 turns`; no nested parentheses in `summary cost`.
+- Depends on `@231self/opencode-shared` `^0.1.4`.
+
 ## 0.1.5 — 2026-11-23
 
 ### Fixed

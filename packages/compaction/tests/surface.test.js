@@ -32,10 +32,13 @@ function tempEnv() {
 }
 
 function harness({ env, core = {}, compact = async () => {}, config = {} }) {
+  // `compact: null` models a host that exposes no session.compact at all.
+  const session = { get: async () => ({ id: "ses_1", agent: "build" }) }
+  if (compact) session.compact = compact
   const ctx = {
     model: { list: async () => MODELS },
     provider: { list: async () => [] },
-    session: { get: async () => ({ id: "ses_1", agent: "build" }), compact },
+    session,
     agent: { get: async () => ({ id: "build", mode: "primary" }) },
   }
   return {
@@ -43,6 +46,76 @@ function harness({ env, core = {}, compact = async () => {}, config = {} }) {
     run: (event) => runContext({ host: "opencode", env, ctx, config, core, event }),
   }
 }
+
+test("an accepted /ctx here is recorded as accepted", async () => {
+  const env = tempEnv()
+  const { run } = harness({ env })
+  writePin("opencode", "ses_1", { compaction: { requestedAt: 12345 } }, env)
+  await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages: [{ parts: [] }] })
+  const result = readPin("opencode", "ses_1", env).compaction.requestedResult
+  expect(result.ok).toBe(true)
+  expect(result.via).toBe("session.compact")
+  expect(result.requestedAt).toBe(12345)
+})
+
+test("a failed /ctx here records the failure instead of vanishing", async () => {
+  // This path used to swallow every error, which is how /ctx here could look
+  // broken forever with no way to tell why.
+  const env = tempEnv()
+  const { run } = harness({
+    env,
+    compact: async () => {
+      const error = new Error("conflict")
+      error.status = 409
+      throw error
+    },
+  })
+  writePin("opencode", "ses_1", { compaction: { requestedAt: 1 } }, env)
+  await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages: [{ parts: [] }] })
+  const result = readPin("opencode", "ses_1", env).compaction.requestedResult
+  expect(result.ok).toBe(false)
+  // A status code is safe to persist; an error message may echo prompt text.
+  expect(result.error).toBe("http 409")
+  expect(readPin("opencode", "ses_1", env).compaction.requestedAt).toBeUndefined()
+})
+
+test("a host without session.compact is reported, not skipped silently", async () => {
+  const env = tempEnv()
+  const { run, ctx } = harness({ env, compact: null })
+  expect(ctx.session.compact).toBeUndefined()
+  writePin("opencode", "ses_1", { compaction: { requestedAt: 1 } }, env)
+  await run({ sessionID: "ses_1", model: MODELS[0], system: [], messages: [{ parts: [] }] })
+  const result = readPin("opencode", "ses_1", env).compaction.requestedResult
+  expect(result.ok).toBe(false)
+  expect(result.via).toBe("none")
+  expect(result.error).toBe("the host exposes no session.compact")
+})
+
+test("the report says what the host did with the last /ctx here", () => {
+  const pin = {
+    compaction: {
+      verdict: "not-yet",
+      turns: 3,
+      changedTurns: 1,
+      requestedResult: { at: 1, requestedAt: 1, ok: false, via: "session.compact", error: "http 409" },
+      advisory: {
+        verdict: "not-yet",
+        source: "deterministic",
+        confidence: 0.7,
+        breakEvenTurns: null,
+        perTurnSavings: null,
+        worthIt: null,
+        pricing: "unknown",
+        cache: { ratio: 0, samples: 0, source: "none" },
+        signals: { contextTokens: 30000, growth: 0 },
+      },
+    },
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
+  for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+  expect(report).toContain("last /ctx here")
+  expect(report).toContain("failed · http 409")
+})
 
 test("a /ctx here marker is honored once and cleared", async () => {
   const env = tempEnv()
@@ -227,6 +300,59 @@ test("an unpriced model never shows invented money in the report", () => {
   expect(unpriced).toContain("no price data")
   expect(unpriced).not.toContain("$0.0000")
   expect(unpriced).toContain("worth it     unknown")
+})
+
+test("a flat plan shows list-price economics and the capacity, not a dead end", () => {
+  const pin = {
+    lastContextSource: "billed",
+    compaction: {
+      verdict: "compact-now",
+      turns: 12,
+      changedTurns: 11,
+      advisory: {
+        verdict: "compact-now",
+        source: "deterministic",
+        confidence: 0.8,
+        breakEvenTurns: 1,
+        perTurnSavings: 0.0123,
+        worthIt: true,
+        pricing: "flat",
+        priceSource: "list price · xiaomi/mimo-v2.6-pro",
+        moneyBasis: "at list price",
+        capacity: { size: 500000, limit: 1048576, headroom: 548576 },
+        cache: { ratio: 0.95, samples: 5, source: "measured" },
+        signals: { contextTokens: 500000, growth: 1200 },
+        estimates: {
+          summaryTokens: 2584,
+          summarySource: "measured",
+          pricing: "flat",
+          summaryCost: 0.0041,
+          summaryCostSource: "modelled · at list price",
+          rebuildCost: 0.0012,
+          rebuildSource: "measured",
+        },
+        projections: [
+          { turns: 3, net: 0.0328, worthIt: true },
+          { turns: 8, net: 0.0943, worthIt: true },
+          { turns: 15, net: 0.1804, worthIt: true },
+        ],
+      },
+    },
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
+  for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+  // Capacity first: on a plan this is the constraint that actually binds.
+  expect(report).toContain("500000 tokens (billed)")
+  expect(report).toContain("1048576 tokens")
+  expect(report).toContain("548576 tokens (52% free)")
+  // The money is real, and it names the price list it came from.
+  expect(report).toContain("flat plan · $0 marginal to you")
+  expect(report).toContain("list price · xiaomi/mimo-v2.6-pro")
+  expect(report).toContain("1 turn (at list price)")
+  expect(report).toContain("$0.0123 (at list price)")
+  expect(report).toContain("yes · free on your plan")
+  expect(report).not.toContain("$0.0000")
+  expect(report).not.toContain("never turns")
 })
 
 test("an empty advisory explains itself instead of inventing numbers", () => {

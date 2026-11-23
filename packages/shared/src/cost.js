@@ -164,6 +164,51 @@ export function normaliseCost(cost) {
 }
 
 /**
+ * A priced entry for the same model ID from another provider.
+ *
+ * A flat-rate pool publishes zeros for a model whose list price is published
+ * elsewhere: `xiaomi-token-plan-sgp/mimo-v2.6-pro` and `xiaomi/mimo-v2.6-pro`
+ * are the same model. Reporting "no cost savings" for the pool would be a
+ * decision to know less than the catalog does. A `-free` model on the `opencode`
+ * provider has no priced sibling at all and stays honestly unpriced.
+ *
+ * Returns `{ providerID, id, cost }` of the best reference, or null. The
+ * caller must name the provider in the report: a sibling's prices are a
+ * reference, never the user's bill.
+ */
+export function referencePrice(model, catalog) {
+  const id = String(model?.id ?? model?.modelID ?? "")
+  if (!id) return null
+  const providerID = String(model?.providerID ?? "")
+  const siblings = (Array.isArray(catalog) ? catalog : []).filter(
+    (entry) =>
+      String(entry?.id ?? entry?.modelID ?? "") === id &&
+      String(entry?.providerID ?? "") !== providerID &&
+      costState(normaliseCost(entry?.cost)) === "priced",
+  )
+  if (siblings.length === 0) return null
+  // The cache-aware comparison needs a cache price, so prefer an entry that
+  // publishes one; among equals the cheapest is the closest to a list price.
+  const rank = (entry) => {
+    const [tier] = normaliseCost(entry?.cost)
+    const cache = Number(tier?.cache?.read) > 0 ? 0 : 1
+    const input = Number(tier?.input) || Number(tier?.output) || Number.POSITIVE_INFINITY
+    return [cache, input]
+  }
+  siblings.sort((a, b) => {
+    const [cacheA, inputA] = rank(a)
+    const [cacheB, inputB] = rank(b)
+    return cacheA - cacheB || inputA - inputB
+  })
+  const best = siblings[0]
+  return {
+    providerID: String(best?.providerID ?? ""),
+    id: String(best?.id ?? best?.modelID ?? id),
+    cost: best?.cost ?? null,
+  }
+}
+
+/**
  * Whether a model's prices can support a cost decision.
  *
  * Three states, not two. A pool that publishes explicit zeros is a flat-rate

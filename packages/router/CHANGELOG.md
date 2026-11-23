@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 — 2026-11-23
+
+### Changed
+
+- Release and dependency only. Carries compaction `0.1.6` and depends on
+  `@231self/opencode-shared` `^0.1.4`, which adds `referencePrice`. No router
+  code changes.
+
 ## 0.3.5 — 2026-11-23
 
 ### Fixed

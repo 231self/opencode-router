@@ -66,13 +66,28 @@ since the last compaction. Counting messages measures parts the host prunes
 from the request, so the message estimate is only the fallback, and `/ctx`
 says which one it is showing.
 
-Cost economics need real prices, and not every model has them. `/ctx` keeps
-three cases apart instead of printing the same numbers for all of them:
-`priced` computes break-even turns and per-turn savings, a flat-rate pool
-whose catalog entry is all zeros is shown as `flat plan · $0 marginal` (no
-cost savings), and a model with no price entry is shown as `no price data`
-with `worth it unknown`. A break-even is never stated when it was not
-computed.
+Cost economics need real prices, and not every model publishes them. `/ctx`
+keeps the cases apart instead of printing the same numbers for all of them.
+A model with its own prices computes break-even turns and per-turn savings.
+A flat-rate pool publishes zeros for a model whose list price lives in a
+sibling catalog entry — `xiaomi-token-plan-sgp/mimo-v2.6-pro` and
+`xiaomi/mimo-v2.6-pro` are the same model — so the comparison is computed at
+that list price and labelled `priced at list price · xiaomi/mimo-v2.6-pro`,
+alongside the plan fact that it costs you nothing either way. A `-free` model
+with no priced sibling, and a model with no catalog entry at all, are shown as
+`no reference price` and `no price data`. A break-even is never stated as your
+own cost when it was not computed from your own prices.
+
+Because a plan makes cost irrelevant but the window finite, `/ctx` reports
+capacity next to the size: the model's limit, the headroom left, and the share
+free. When headroom drops below 15% the closing note says so rather than
+telling you to keep working.
+
+**`/ctx here`** asks the host to compact this session; the host runs an
+admitted compaction at the next step boundary. `/ctx` reports what it did with
+the request (`last /ctx here`, `outcome accepted` or `failed · http 409`), and
+only a status code or an error name is ever persisted — an error message may
+echo prompt text. The request never repeats on its own.
 
 The compacted size and the one-time cost are calibrated from real compactions.
 After a compaction the plugin observed as it happened, it compares its

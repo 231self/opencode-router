@@ -1,6 +1,6 @@
 [package]
 name = "omlx_router_core"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Pure routing and context-optimiser core for opencode-omlx-router"

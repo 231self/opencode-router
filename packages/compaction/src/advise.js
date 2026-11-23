@@ -24,6 +24,7 @@ export { guardAllows }
 export async function advise({
   config = {},
   model = null,
+  reference = null,
   messages = [],
   tailMessages = null,
   measuredTokens = 0,
@@ -56,10 +57,34 @@ export async function advise({
   // on structure alone (no veto from invented zeros). The hit rate is the
   // measured share when the host reported usage, and the configured fallback
   // only when nothing has been observed.
-  const tiers = normaliseCost(model?.cost)
-  // Three states: priced (real numbers), flat (the pool publishes zeros), and
-  // unknown (no entry at all). Only `priced` supports a cost decision.
-  const pricing = costState(tiers)
+  //
+  // Three states for the model's own entry: priced, flat (the pool publishes
+  // explicit zeros), unknown (no entry at all). A flat-rate pool's list price
+  // is usually published by a sibling entry for the same model ID, so the
+  // comparison is computed at those prices — labelled as a reference, because
+  // a sibling's prices are not the user's bill.
+  const ownTiers = normaliseCost(model?.cost)
+  const pricing = costState(ownTiers)
+  const referenceTiers = normaliseCost(reference?.cost)
+  const pricedHere = pricing === "priced"
+  const tiers = pricedHere ? ownTiers : referenceTiers
+  const priceSource = pricedHere
+    ? `catalog · ${model?.providerID ?? "?"}/${model?.id ?? model?.modelID ?? "?"}`
+    : referenceTiers.length > 0
+      ? `list price · ${reference.providerID}/${reference.id}`
+      : pricing === "flat"
+        ? "none · no reference price"
+        : "none · no price data"
+  // Whether the money below was actually computed, and at whose prices.
+  const moneyComputed = tiers.some(
+    (tier) => Number(tier?.input) > 0 || Number(tier?.output) > 0,
+  )
+  // Non-empty when the money is a projection at a sibling's list price rather
+  // than the user's own bill. Only claim it when money was actually computed.
+  const moneyBasis = pricedHere || !moneyComputed ? "" : "at list price"
+  const moneySuffix = moneyBasis ? ` · ${moneyBasis}` : ""
+  const unpricedNote =
+    pricing === "flat" ? "no reference price · $0 marginal" : "no price data"
   const ratio = cache?.ratio ?? (Number(config?.pin?.cacheHitRatio) || 0)
   const calibrated = calibrationFor(calibration, model)
   const measuredSummary = Number(calibrated?.summary?.value)
@@ -78,6 +103,14 @@ export async function advise({
   const estimatorTokens = Math.max(0, Number(estimatedTokens) || 0)
   const predictedCompacted =
     estimatorTokens > 0 ? measuredTokens * (compactedTokens / estimatorTokens) : compactedTokens
+  // Capacity is what actually forces a compaction when the tokens are free:
+  // a plan makes cost irrelevant but the window finite.
+  const contextLimit = Math.max(0, Number(model?.limit?.context) || 0)
+  const capacity = {
+    size: Math.max(0, Number(measuredTokens) || 0),
+    limit: contextLimit > 0 ? contextLimit : null,
+    headroom: contextLimit > 0 ? Math.max(0, contextLimit - (Number(measuredTokens) || 0)) : null,
+  }
   const summaryMeasured = Number(calibrated?.summary?.samples) > 0
   const requestMeasured = Number(calibrated?.request?.samples) > 0
   const rebuildMeasured = Number(calibrated?.rebuild?.samples) > 0
@@ -90,7 +123,7 @@ export async function advise({
     ? meanBucketCost(tiers, calibrated.rebuild, { output: false })
     : null
   let summaryCost = null
-  let summaryCostSource = pricing === "flat" ? "flat plan ($0 marginal)" : "no price data"
+  let summaryCostSource = unpricedNote
   let keepCost = null
   let steadyCost = null
   let firstTurnCost = null
@@ -103,7 +136,7 @@ export async function advise({
         cacheHitRatio: ratio,
         outputTokens: summaryTokens,
       })
-      summaryCostSource = "modelled"
+      summaryCostSource = `modelled${moneySuffix}`
     } else {
       summaryCost = summaryCostMeasured
       summaryCostSource = "measured"
@@ -152,6 +185,9 @@ export async function advise({
     instability: Number(noise?.instability) || 0,
     baseCooldown: Number(settings.baseCooldown) || 3,
     pricing,
+    priceSource,
+    moneyBasis,
+    capacity,
     cache: cache ?? { ratio, samples: 0, source: "fallback" },
     projections: projectHorizons(roi, horizons),
     estimates: {
@@ -164,13 +200,7 @@ export async function advise({
       summaryCostSource,
       rebuildCost,
       rebuildSource:
-        rebuildCost != null
-          ? "measured"
-          : pricing === "flat"
-            ? "flat plan ($0 marginal)"
-            : pricing === "priced"
-              ? "modelled"
-              : "no price data",
+        rebuildCost != null ? "measured" : moneyComputed ? `modelled${moneySuffix}` : unpricedNote,
       lastPrediction: calibrated?.lastPrediction ?? null,
       predictionError: Number(calibrated?.error?.value) || 0,
     },

@@ -161,13 +161,13 @@ test("without calibration the summary size and costs are explicitly assumed", as
   expect(advisory.estimates.summaryCost).toBeGreaterThan(0)
 })
 
-test("a flat-rate pool states no economics instead of inventing zeros", async () => {
-  // xiaomi-token-plan-sgp/mimo-v2.6-pro publishes an all-zero cost entry.
+test("a free tier with no reference states no economics instead of inventing zeros", async () => {
+  // opencode/iceman-free and friends publish zeros and have no priced sibling.
   const { advisory } = await advise({
     config: { compaction: { expectedTurns: 8, horizons: [3, 8, 15] }, pin: { cacheHitRatio: 0.8 } },
     model: {
-      providerID: "xiaomi-token-plan-sgp",
-      id: "mimo-v2.6-pro",
+      providerID: "opencode",
+      id: "iceman-free",
       cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
       limit: { context: 262144, output: 8192 },
     },
@@ -180,11 +180,72 @@ test("a flat-rate pool states no economics instead of inventing zeros", async ()
   expect(advisory.breakEvenTurns).toBeNull()
   expect(advisory.perTurnSavings).toBeNull()
   expect(advisory.worthIt).toBeNull()
+  expect(advisory.moneyBasis).toBe("")
   expect(advisory.estimates.summaryCost).toBeNull()
-  expect(advisory.estimates.summaryCostSource).toBe("flat plan ($0 marginal)")
+  expect(advisory.estimates.summaryCostSource).toBe("no reference price · $0 marginal")
   // The horizons survive uncomputed rather than disappearing from the report.
   expect(advisory.projections.map((entry) => entry.turns)).toEqual([3, 8, 15])
   expect(advisory.projections.every((entry) => entry.worthIt === null)).toBe(true)
+})
+
+test("a flat-rate pool computes economics at a sibling's list price", async () => {
+  // xiaomi-token-plan-sgp/mimo-v2.6-pro publishes zeros; xiaomi/mimo-v2.6-pro
+  // is the same model with a real price. The plan charges nothing either way,
+  // so the comparison is worth computing and must be labelled as a reference.
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, horizons: [3, 8, 15] }, pin: { cacheHitRatio: 0.95 } },
+    model: {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 1048576, output: 8192 },
+    },
+    reference: {
+      providerID: "xiaomi",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0.435, output: 0.87, cache: { read: 0.0036, write: 0 } }],
+    },
+    messages: BOUNDARY,
+    measuredTokens: 500_000,
+    estimatedTokens: 500_000,
+    previousTokens: 400_000,
+  })
+  expect(advisory.pricing).toBe("flat")
+  expect(advisory.moneyBasis).toBe("at list price")
+  expect(advisory.priceSource).toBe("list price · xiaomi/mimo-v2.6-pro")
+  expect(advisory.worthIt).toBe(true)
+  expect(advisory.perTurnSavings).toBeGreaterThan(0.01)
+  expect(advisory.breakEvenTurns).toBeLessThanOrEqual(8)
+  // The capacity story is what a plan actually makes binding.
+  expect(advisory.capacity).toEqual({ size: 500_000, limit: 1048576, headroom: 548576 })
+  // A projection must not veto an action whose real marginal cost is zero.
+  expect(advisory.verdict).toBe("compact-now")
+})
+
+test("a projection at list price never vetoes a structural compaction", async () => {
+  // A tiny session at list prices: compaction would cost more than it saves.
+  // On a flat plan that must not turn a safe checkpoint into "not-yet".
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 1, summaryTokens: 4000 }, pin: { cacheHitRatio: 0.95 } },
+    model: {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 1048576, output: 8192 },
+    },
+    reference: {
+      providerID: "xiaomi",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0.435, output: 0.87, cache: { read: 0.0036, write: 0 } }],
+    },
+    messages: BOUNDARY,
+    measuredTokens: 30_000,
+    estimatedTokens: 30_000,
+    previousTokens: 10_000,
+  })
+  expect(advisory.moneyBasis).toBe("at list price")
+  expect(advisory.worthIt).toBe(false)
+  expect(advisory.verdict).toBe("compact-now")
 })
 
 test("a model with no price entry is unknown, not free", async () => {

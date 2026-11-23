@@ -1,6 +1,6 @@
 {
   "name": "@231self/opencode-shared",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Shared runtime for the opencode-router packages: cache-aware pricing and token measurement, config/state host adapters, and the Kilo context shim.",
   "type": "module",
   "license": "Apache-2.0",

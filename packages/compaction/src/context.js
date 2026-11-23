@@ -1,4 +1,5 @@
 import { readPin, sessionHash, writePin } from "@231self/opencode-shared/state.js"
+import { referencePrice } from "@231self/opencode-shared/cost.js"
 import { sameModel, refOf } from "@231self/opencode-shared/refs.js"
 import {
   countContextTokens,
@@ -16,21 +17,25 @@ import {
 import { applyPlan, buildOptimiseRequest } from "./optimiser.js"
 import { readCompactionNoise } from "./noise.js"
 
+/** Every model the host knows, across providers. Never throws. */
+export async function catalogModels(ctx) {
+  try {
+    const value = await ctx?.model?.list()
+    return Array.isArray(value) ? value : (value?.data ?? [])
+  } catch {
+    return []
+  }
+}
+
 /**
  * The V2 context hook reports only provider/id, not limits. Fill in the
  * catalog entry so the optimiser sees the real context budget instead of
  * treating every turn as an overflow.
  */
-export async function modelFor(ctx, contextModel) {
+export async function modelFor(ctx, contextModel, catalog = null) {
   if (!contextModel) return null
   if (Number(contextModel.limit?.context) > 0) return contextModel
-  let models = []
-  try {
-    const value = await ctx?.model?.list()
-    models = Array.isArray(value) ? value : (value?.data ?? [])
-  } catch {
-    models = []
-  }
+  const models = catalog ?? (await catalogModels(ctx))
   const found = models.find(
     (model) =>
       String(model?.providerID) === String(contextModel.providerID) &&
@@ -87,7 +92,12 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     } catch {
       // The hook's own messages remain the fallback measurement.
     }
-    const model = await modelFor(ctx, event?.model)
+    const catalog = await catalogModels(ctx)
+    const model = await modelFor(ctx, event?.model, catalog)
+    // A flat-rate pool publishes zeros for a model whose list price lives in a
+    // sibling entry. That reference lets the economics still speak; the report
+    // names the provider so it is never read as the user's own bill.
+    const reference = referencePrice(model, catalog)
     let tokens = null
     let optimiser = null
     let overflow = false
@@ -286,6 +296,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
         const { advisory, guard } = await advise({
           config,
           model,
+          reference,
           messages: event.messages ?? [],
           measuredTokens,
           estimatedTokens,
@@ -336,6 +347,9 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     } else {
       nextCompaction = { ...(compactionState ?? {}) }
       if (fresh.compaction?.requestedAt) nextCompaction.requestedAt = fresh.compaction.requestedAt
+      if (fresh.compaction?.requestedResult) {
+        nextCompaction.requestedResult = fresh.compaction.requestedResult
+      }
     }
     if (checkpointID) nextCompaction.checkpoint = checkpointID
 
@@ -360,19 +374,59 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
   }
 }
 
+/** A failure kind safe to persist: a status or an error name, never a message. */
+function errorKind(error) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status)
+  if (Number.isFinite(status) && status > 0) return `http ${status}`
+  return String(error?.name ?? "error").slice(0, 40)
+}
+
 /**
- * Honor a `/ctx here` request from the TUI. The marker is cleared before
- * the host call so a failed or refused compaction never loops.
+ * Honor a `/ctx here` request from the TUI.
+ *
+ * The marker is cleared before the host call so a refused compaction never
+ * loops, and the outcome is written back so `/ctx` can report it. This path
+ * used to swallow everything: `/ctx here` could fail every time with no way to
+ * tell whether the call was skipped, refused, or thrown. A recorded outcome
+ * turns that into a diagnosis. Returns the outcome, or null when there was no
+ * request to honor.
  */
 export async function honorCompactRequest({ host, env, ctx, sessionID }) {
+  let pin
   try {
-    const pin = readPin(host, sessionID, env) ?? {}
-    if (!pin.compaction?.requestedAt) return
-    writePin(host, sessionID, { ...pin, compaction: { ...pin.compaction, requestedAt: undefined } }, env)
-    if (typeof ctx?.session?.compact === "function") {
-      await ctx.session.compact({ sessionID })
-    }
+    pin = readPin(host, sessionID, env) ?? {}
   } catch {
-    // A refused compaction must never break a turn.
+    return null
   }
+  const requestedAt = Number(pin.compaction?.requestedAt) || 0
+  if (!requestedAt) return null
+
+  const outcome = { at: Date.now(), requestedAt, ok: true, via: "session.compact" }
+  try {
+    writePin(host, sessionID, { ...pin, compaction: { ...pin.compaction, requestedAt: undefined } }, env)
+    const compact = ctx?.session?.compact
+    if (typeof compact !== "function") {
+      outcome.ok = false
+      outcome.via = "none"
+      outcome.error = "the host exposes no session.compact"
+    } else {
+      await compact.call(ctx.session, { sessionID, delivery: "steer" })
+    }
+  } catch (error) {
+    outcome.ok = false
+    outcome.error = errorKind(error)
+  }
+
+  try {
+    const fresh = readPin(host, sessionID, env) ?? pin
+    writePin(
+      host,
+      sessionID,
+      { ...fresh, compaction: { ...(fresh.compaction ?? {}), requestedResult: outcome } },
+      env,
+    )
+  } catch {
+    // A lost result must never break a turn.
+  }
+  return outcome
 }
