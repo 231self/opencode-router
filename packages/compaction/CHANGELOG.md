@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4 — 2026-11-23
+
+### Fixed
+
+- Depend on `@231self/opencode-shared` `^0.1.2`. Version 0.1.3 imported the
+  new `contextMessageTokens` export but declared `^0.1.1`, so npm could
+  resolve shared 0.1.1, which lacks it, and the plugin failed to load. The
+  code is otherwise identical to 0.1.3.
+
 ## 0.1.3 — 2026-11-23
 
 ### Fixed

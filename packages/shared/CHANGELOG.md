@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 — 2026-11-23
+
+### Added
+
+- Export `contextMessageTokens`, the per-message V2 active-context counter used
+  by the compaction tail estimator. Compaction 0.1.3 imports it; shared 0.1.1
+  did not export it, so that pair failed to load.
+
 ## 0.1.1 — 2026-11-22
 
 ### Added

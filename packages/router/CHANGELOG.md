@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4 — 2026-11-23
+
+### Changed
+
+- Depend on `@231self/opencode-shared` `^0.1.2`. Carries compaction `0.1.4`,
+  which fixes the dependency floor that made 0.1.3 fail to load. No router
+  code changes.
+
 ## 0.3.3 — 2026-11-23
 
 ### Changed
