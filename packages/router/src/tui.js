@@ -1,5 +1,7 @@
-import { configPath, formatWeights, readConfig, resolvePolicyWeights, saveConfig } from "@231self/opencode-shared/config.js"
+import { configPath, formatWeights, readConfig, resolvePolicyWeights, saveConfig, setConfigValue } from "@231self/opencode-shared/config.js"
 import { facts, join, note, plural, prose, section } from "@231self/opencode-shared/format.js"
+import { planLabel, resolveBillings, withPlan } from "@231self/opencode-shared/plan.js"
+import { dialogAdapter, runPlanWizard } from "@231self/opencode-shared/plan-wizard.js"
 import { Judge } from "./judge.js"
 import {
   Provisioner,
@@ -38,6 +40,7 @@ import {
   shortPath,
 } from "./status.js"
 import { collectDebug, formatDebug } from "./debug.js"
+import { registerRouterSidebar } from "./tui-sidebar.js"
 import { ABI_VERSION, VERSION } from "./version.js"
 
 const HOST = "opencode"
@@ -48,6 +51,7 @@ const USAGE = {
   retention: "/router retention [cache|balanced|switch]",
   pricing: "/router pricing [refresh]",
   pins: "/router pins [clear]",
+  plan: "/router plan",
   quality: "/router quality [refresh]",
   history: "/router history [n]",
   timing: "/router timing [n]",
@@ -71,6 +75,11 @@ const HELP = [
   { command: "pool", line: "/router pool", detail: "Models available to the router and how to edit them" },
   { command: "pricing", detail: "Input/output/cache prices for the pool, and the price source" },
   { command: "pins", detail: "Per-session model choice, active blocks, and age; list or clear" },
+  {
+    command: "plan",
+    line: "/router plan",
+    detail: "Record the plan you pay for, so the pool is priced at your own rates",
+  },
   { command: "quality", detail: "Score source, cache age, and refresh" },
   { command: "timing", detail: "Local judge vs remote model vs tool time" },
   { command: "history", detail: "Recent per-turn decisions, including subagents" },
@@ -327,7 +336,7 @@ function priceText(cost, source) {
   if (tier?.output !== undefined) parts.push(`out $${tier.output}`)
   if (tier?.cache?.read !== undefined) parts.push(`cache read $${tier.cache.read}`)
   if (parts.length === 0) return "unknown (no pricing data)"
-  const origin = source && source !== "catalog" ? ` (${source === "modelsdev" ? "models.dev" : source})` : ""
+  const origin = source && source !== "catalog" ? ` (${source === "modelsdev" ? "models.dev" : source === "plan" ? "plan rate" : source})` : ""
   return `${parts.join(" · ")} /M${origin}`
 }
 
@@ -692,6 +701,11 @@ async function openMenu(context) {
         },
         { title: "Pool", value: "pool", description: "Models available to the router and how to edit them" },
         { title: "Pricing", value: "pricing", description: "Input/output/cache prices for the pool" },
+        {
+          title: resolveBillings(config?.billing).length > 0 ? "Add a plan" : "Plan billing",
+          value: "plan",
+          description: "Record the plan you pay for; the pool prices covered models at its rates",
+        },
         { title: "Refresh prices", value: "pricing refresh", description: "Fetch the public price tables now" },
         {
           title: "Session pins",
@@ -879,6 +893,30 @@ async function runCommand(context, input) {
       }
       const { models, providers } = await poolCatalog(context)
       await show(context, withUsage(pricingLines(config, models, providers), "pricing"))
+      return
+    }
+    case "plan": {
+      const dialog = context.ui?.dialog
+      if (!dialog?.select || !dialog?.prompt || !dialog?.confirm) {
+        await show(context, prose("This host has no dialog support; edit billing in the config file instead."))
+        return
+      }
+      const record = await runPlanWizard({ ask: dialogAdapter(dialog), modelLabel: "your models" })
+      if (!record) return
+      // Plans accumulate: a second run adds a plan beside the ones on file.
+      // "Pay per token" and "skip" replace, since they say no plan applies.
+      const merged = saveConfig(setConfigValue(config, "billing", withPlan(config?.billing, record)))
+      const plans = resolveBillings(merged?.billing ?? config?.billing)
+      await show(
+        context,
+        prose(
+          record.skipped
+            ? "Plan setup skipped. /router plan runs it again."
+            : record.payg
+              ? "Recorded: pay per token. The pool keeps list prices."
+              : `Added ${planLabel(record) ?? "custom plan"}. Now ${plans.length} plan${plans.length === 1 ? "" : "s"} on file; the pool prices covered models at their rates.`,
+        ),
+      )
       return
     }
     case "pins": {
@@ -1228,6 +1266,16 @@ export default {
       )
       disposers.push(context.data.on("session.execution.succeeded", (event) => void refresh(event)))
     }
+
+    // Sidebar block: this session's model, pin, policy, and quality.
+    // Without OpenTUI or a slot API there is simply no sidebar.
+    void registerRouterSidebar(context)
+      .then((dispose) => {
+        if (typeof dispose === "function") disposers.push(dispose)
+      })
+      .catch(() => {
+        // The block is a surface extra; its failure must not break the TUI.
+      })
 
     context.keymap.layer(() => ({
       mode: "global",

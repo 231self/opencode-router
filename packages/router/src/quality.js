@@ -2,6 +2,9 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { stateRoot, writeJsonAtomic } from "@231self/opencode-shared/state.js"
+import { normalizeModelName } from "@231self/opencode-shared/price-table.js"
+
+export { normalizeModelName }
 
 const DATASETS_SERVER = "https://datasets-server.huggingface.co/rows"
 const DEFAULT_DATASET = "lmarena-ai/leaderboard-dataset"
@@ -15,15 +18,6 @@ const MAX_QUALITY = 0.97
 
 export function qualityCachePath(env = process.env) {
   return env.OMLX_ROUTER_QUALITY_CACHE || path.join(stateRoot(env), "quality.json")
-}
-
-/** Normalise a model name for matching: drop qualifiers and punctuation. */
-export function normalizeModelName(value) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, " ")
-    .replace(/^[^/]+\//, "")
-    .replace(/[^a-z0-9]+/g, "")
 }
 
 /** Catalog keys to try for one model: label, id, and display name. */

@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.2.0 — 2026-11-24
+
+### Added
+
+- Plan billing. `/ctx plan` sets up the plan facts (price, allowance, credit
+  weights) from the built-in catalog of published tiers or by hand, and
+  records them in the config with their source and check date. On first load
+  with a flat-plan model and no billing recorded the plugin asks once;
+  "skip" and "pay per token" are recorded too, so the question never
+  repeats.
+- Several plans at once. `billing` is now a list; `/ctx plan` adds a plan
+  beside the ones on file rather than replacing them. Each plan is attributed
+  to the models it covers — the catalog's weight table, or a `models` list —
+  so every model is priced at its own plan's rates. The sidebar and
+  `/ctx report` show each plan its own burn instead of one blended figure,
+  and `/ctx plan refresh` re-reads every tracked plan's price in place.
+- `/ctx plan refresh` — re-reads the plan's price from a public tracker feed
+  (LimitDex publishes its dataset as free JSON). The command is the only
+  path to the network: it runs nothing on a turn, keeps the recorded facts
+  when the feed is down, and prints the vendor's own limit wording beside
+  the price. For a plan whose token allowance is not published (`ChatGPT
+  Plus`, for example) it records the price and says the shadow price cannot
+  be computed — it never invents an allowance.
+- Plan-aware economics. With a plan recorded, `/ctx report` prices the
+  comparison in plan credits at your own rates (`basis plan rate · your own
+  credits`), shows the allowance burn (`12.4B of 82.0B credits (15%)`), and
+  prices a cache expiry as the credit premium it charges over staying hot
+  (`150.0M credits to re-bill (120x hot)`). Plan prices are your own bill,
+  so unlike a sibling's list price they may veto a compaction that does not
+  pay.
+- `/ctx menu` action menu and `/ctx help [command]` command reference, in
+  the same shape as `/router`. Bare `/ctx` opens the menu; `/ctx report`
+  shows the advisory directly. An unrecognised command points at the help.
+- The cost of compacting is named as what it is: the **KV-cache
+  invalidation**. Compacting destroys the cache, so the next turn re-prefills
+  the whole compacted context at cache-write rates — which run ~120x a cache
+  read. That burst is 20x the summary cost in practice, so `/ctx report`
+  leads the economics with it and labels it. This is the one-time cost that
+  decides whether a compaction pays.
+- On a plan the trade is measured **in credits**, the unit the allowance
+  burns. The dollar figures are near zero there — a tiny shadow price times a
+  big token count — so the invalidation reads as `$0.0172` and looks trivial.
+  In credits it is `148.8M`, which is the real cost. `/ctx report` shows both:
+  the dollars, and a `plan credits` section with the figure that decides.
+  The **verdict** follows the credit figures on a plan, since they are the
+  constraint that actually binds; without a plan, dollars decide.
+- Sidebar block: window use, plan name, allowance burn and projection,
+  cache-expiry exposure. Refreshes on model changes and finished turns.
+  Leads with the verdict — `compact now`, `keep working`, or `delegate` —
+  then the evidence behind it, since the conclusion is the point of the block.
+
+### Changed
+
+- The decision "whose prices apply to this model" is no longer written here:
+  it moved to `@231self/opencode-shared/cost-resolution.js`, which the router
+  calls too. The two copies had drifted — this one priced a flat pool at a
+  sibling's list price while the router priced it at catalog prices. They
+  cannot disagree now, and the `ownBill` flag that decides whether money may
+  veto lives beside the precedence instead of being re-derived.
+- The advisory now prices against the public price table (models.dev, LiteLLM)
+  when one exists, ahead of the host catalog. The catalog is the host's own
+  opinion of a price and is not always right; a published rate is checkable,
+  so it wins whenever both speak. Without a cached table the advisory reads
+  the catalog exactly as before.
+
 ## 0.1.6 — 2026-11-23
 
 ### Added

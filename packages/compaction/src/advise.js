@@ -1,4 +1,6 @@
-import { compactionRoi, costState, modelledTurnCost, normaliseCost, tierAt } from "@231self/opencode-shared/cost.js"
+import { compactionRoi, modelledTurnCost, tierAt } from "@231self/opencode-shared/cost.js"
+import { cacheExpiryCredits, creditCost, creditTier, planForModel, planLabel, weightsFor } from "@231self/opencode-shared/plan.js"
+import { priceSourceLabel, resolveCost } from "@231self/opencode-shared/cost-resolution.js"
 import { contextMessageTokens, promptPartTokens } from "@231self/opencode-shared/tokens.js"
 
 import { composeAdvisory, guardAllows, normaliseHorizons, projectHorizons } from "./advisory.js"
@@ -25,6 +27,7 @@ export async function advise({
   config = {},
   model = null,
   reference = null,
+  listPrice = null,
   messages = [],
   tailMessages = null,
   measuredTokens = 0,
@@ -58,33 +61,28 @@ export async function advise({
   // measured share when the host reported usage, and the configured fallback
   // only when nothing has been observed.
   //
-  // Three states for the model's own entry: priced, flat (the pool publishes
-  // explicit zeros), unknown (no entry at all). A flat-rate pool's list price
-  // is usually published by a sibling entry for the same model ID, so the
-  // comparison is computed at those prices — labelled as a reference, because
-  // a sibling's prices are not the user's bill.
-  const ownTiers = normaliseCost(model?.cost)
-  const pricing = costState(ownTiers)
-  const referenceTiers = normaliseCost(reference?.cost)
-  const pricedHere = pricing === "priced"
-  const tiers = pricedHere ? ownTiers : referenceTiers
-  const priceSource = pricedHere
-    ? `catalog · ${model?.providerID ?? "?"}/${model?.id ?? model?.modelID ?? "?"}`
-    : referenceTiers.length > 0
-      ? `list price · ${reference.providerID}/${reference.id}`
-      : pricing === "flat"
-        ? "none · no reference price"
-        : "none · no price data"
+  // Which prices apply is not decided here: `resolveCost` holds the one
+  // precedence both consumers share — plan, then the public price table, then
+  // the host catalog, then a sibling's list price as a projection. A plan is
+  // the user's own bill and may veto; a list price is not, and never does.
+  const billing = config?.billing
+  const modelID = model?.id ?? model?.modelID ?? ""
+  const resolved = resolveCost({ model, billing, listPrice, reference })
+  const tiers = resolved.tiers
+  const planTierList = resolved.origin === "plan" ? resolved.tiers : null
+  const pricing = resolved.pricing
+  const pricedHere = resolved.pricedHere
+  const planName = resolved.planName
+  const priceSource = priceSourceLabel(resolved, model)
   // Whether the money below was actually computed, and at whose prices.
-  const moneyComputed = tiers.some(
-    (tier) => Number(tier?.input) > 0 || Number(tier?.output) > 0,
-  )
+  const moneyComputed = resolved.computed
   // Non-empty when the money is a projection at a sibling's list price rather
-  // than the user's own bill. Only claim it when money was actually computed.
-  const moneyBasis = pricedHere || !moneyComputed ? "" : "at list price"
-  const moneySuffix = moneyBasis ? ` · ${moneyBasis}` : ""
-  const unpricedNote =
-    pricing === "flat" ? "no reference price · $0 marginal" : "no price data"
+  // than the user's own bill. Plan prices are the user's own bill, so they
+  // stay empty — they may veto, like catalog prices. Only claim it when money
+  // was actually computed.
+  const moneyBasis = resolved.moneyBasis
+  const moneySuffix = moneyBasis ? ` · ${moneyBasis}` : planTierList ? " · at plan rate" : ""
+  const unpricedNote = resolved.unpricedNote
   const ratio = cache?.ratio ?? (Number(config?.pin?.cacheHitRatio) || 0)
   const calibrated = calibrationFor(calibration, model)
   const measuredSummary = Number(calibrated?.summary?.value)
@@ -175,11 +173,57 @@ export async function advise({
           firstTurnCost,
         })
       : null
+  // The same trade in credits — the unit the allowance actually burns. On a
+  // plan the dollar figures are near zero (a tiny shadow price times a big
+  // token count), so the KV-cache invalidation reads as $0.0172 and looks
+  // trivial. In credits it is 148.8M, the number that decides whether to
+  // compact. `compactionRoi` is unit-agnostic: fed the credit weights as the
+  // price, it prices the same turns in credits. This is the real cost of a
+  // compaction on a plan — the window it burns — and it is what the verdict
+  // should weigh there.
+  const creditPlanTier = creditTier(billing, modelID)
+  const planRoi =
+    creditPlanTier && keepTier && compactedTier
+      ? compactionRoi({
+          price: creditPlanTier,
+          contextTokens: measuredTokens,
+          compactedTokens,
+          cacheState: null,
+          cacheHitRatio: ratio,
+          outputTokens: 0,
+          expectedTurns: Number(settings.expectedTurns) || 0,
+          summaryCost: summaryTokens * creditPlanTier.output,
+        })
+      : null
+  // Plan-side figures, in credits: the currency the user's allowance actually
+  // burns. Null when the plan has no weights for this model — never invented.
+  const planEstimates = billing
+    ? {
+        // Name the plan that covers this model, not the first one configured.
+        plan: planLabel(planForModel(billing, modelID)),
+        // Whether the money in this report was actually computed at plan
+        // rates. An unpriced plan (price known, allowance not published)
+        // produces no plan tier, so the money below is a catalog or list
+        // figure and must not be labelled "plan rate".
+        atPlanRate: Boolean(planTierList),
+        weightsFor: weightsFor(billing, modelID) ? modelID : null,
+        // What one hot turn of this context burns in credits.
+        keepCredits: creditCost(
+          { input: 0, output: 0, reasoning: 0, cache: { read: measuredTokens, write: 0 } },
+          billing,
+          modelID,
+        ),
+        // What one cache expiry of this prefix costs, and its premium over
+        // staying hot: the insurance value of compacting before expiry.
+        expiry: cacheExpiryCredits(measuredTokens, billing, modelID),
+      }
+    : null
   const horizons = normaliseHorizons(settings.horizons)
 
   const advisory = composeAdvisory({
     structural,
     roi,
+    planRoi,
     refined,
     guard,
     instability: Number(noise?.instability) || 0,
@@ -201,6 +245,7 @@ export async function advise({
       rebuildCost,
       rebuildSource:
         rebuildCost != null ? "measured" : moneyComputed ? `modelled${moneySuffix}` : unpricedNote,
+      plan: planEstimates,
       lastPrediction: calibrated?.lastPrediction ?? null,
       predictionError: Number(calibrated?.error?.value) || 0,
     },

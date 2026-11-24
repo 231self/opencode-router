@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 
 import tui from "../src/tui.js"
+import { resolveBillings } from "@231self/opencode-shared/plan.js"
 import { readConfig, saveConfig } from "@231self/opencode-shared/config.js"
 import { writeQualityCache } from "../src/quality.js"
 import { writePricingCache } from "../src/pricing.js"
@@ -826,4 +827,48 @@ test("long error alerts wrap and keep the detail", async () => {
     }
     expect(entry.message).toContain("adminApiKey")
   }
+})
+
+test("/router plan records a plan and prices the pool at its rates", async () => {
+  environment()
+  const { context, messages, command, setSelect, setConfirm } = fakeContext()
+  tui.setup(context)
+
+  // Wizard answers: pick Xiaomi MiMo from the catalog, then the Max tier.
+  setSelect("xiaomi-mimo", "max")
+  setConfirm(true)
+  await command().run("plan")
+
+  const config = readConfig({ write: false }).config
+  expect(config.billing).toBeTruthy()
+  const plans = resolveBillings(config.billing)
+  expect(plans).toHaveLength(1)
+  expect(plans[0].name).toBe("Xiaomi MiMo Token Plan Max")
+  expect(messages.some((entry) => (entry.message ?? "").includes("Xiaomi MiMo Token Plan Max"))).toBe(true)
+})
+
+test("/router plan adds a second plan beside the first", async () => {
+  environment()
+  const { context, command, setSelect, setConfirm } = fakeContext()
+  tui.setup(context)
+
+  setSelect("xiaomi-mimo", "max")
+  setConfirm(true)
+  await command().run("plan")
+  setSelect("github-copilot", "pro")
+  setConfirm(true)
+  await command().run("plan")
+
+  const plans = resolveBillings(readConfig({ write: false }).config.billing)
+  expect(plans).toHaveLength(2)
+  expect(plans.map((p) => p.vendor)).toEqual(["xiaomi-mimo", "github-copilot"])
+})
+
+test("/router plan backs out and saves nothing when the wizard is escaped", async () => {
+  environment()
+  const { context, command, setSelect } = fakeContext()
+  tui.setup(context)
+  setSelect(undefined)
+  await command().run("plan")
+  expect(readConfig({ write: false }).config.billing ?? null).toBeFalsy()
 })

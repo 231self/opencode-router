@@ -7,25 +7,25 @@
     },
     "packages/compaction": {
       "name": "@231self/opencode-compaction",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
-        "@231self/opencode-shared": "^0.1.0",
+        "@231self/opencode-shared": "^0.2.0",
       },
     },
     "packages/router": {
       "name": "@231self/opencode-router",
-      "version": "0.2.8",
+      "version": "0.4.0",
       "bin": {
         "opencode-model-router": "bin/omlx-router.mjs",
         "omlx-router": "bin/omlx-router.mjs",
       },
       "dependencies": {
-        "@231self/opencode-shared": "^0.1.0",
+        "@231self/opencode-shared": "^0.2.0",
       },
     },
     "packages/shared": {
       "name": "@231self/opencode-shared",
-      "version": "0.1.0",
+      "version": "0.2.0",
     },
   },
   "packages": {

@@ -103,6 +103,7 @@ export const DEFAULT_CONFIG = {
       plan: { policy: "quality", qualityFloor: 0.8 },
     },
   },
+  billing: null,
   telemetry: { enabled: true },
   failover: {
     enabled: true,

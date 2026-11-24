@@ -20,6 +20,11 @@ routing and context management. Three publishable packages in one workspace:
 - **No TypeScript application code.** Host adapters, TUI part, CLI, and tests are
   plain ESM JavaScript with JSDoc where useful. The decision engine is Rust
   compiled to `wasm32-unknown-unknown`.
+- **TUI surfaces are plain ESM JavaScript — no JSX/TSX, no `solid-js`.** Menus
+  fit 72 columns with an ≤80 regression gate. One narrow exception: the
+  sidebar modules (`tui-sidebar.js`) build renderables from `@opentui/core`
+  classes behind a lazy import, in plain JS. No other module may import
+  OpenTUI, and where the host provides no OpenTUI the sidebar is skipped.
 - **The cores are pure.** No I/O, clock, randomness, or imports in any
   `core/`. Timestamps, pool data, pins, settings, and judge verdicts are
   passed in; state is passed back for the adapter to persist.

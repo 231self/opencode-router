@@ -3,11 +3,11 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { DEFAULT_CONFIG } from "@231self/opencode-shared/config.js"
+import { DEFAULT_CONFIG, readConfig } from "@231self/opencode-shared/config.js"
 import { readPin, writePin } from "@231self/opencode-shared/state.js"
 
 import { runContext } from "../src/context.js"
-import tui, { advisoryReport } from "../src/tui.js"
+import tui, { advisoryReport, runPlanRefresh } from "../src/tui.js"
 
 const MODELS = [
   {
@@ -237,6 +237,74 @@ test("the advisory popup wraps within 80 columns and reports one fact per row", 
   expect(report).toContain("12%")
 })
 
+test("a plan report shows credits, the expiry premium, and plan-rate economics", () => {
+  const pin = {
+    compaction: {
+      verdict: "compact-now",
+      turns: 4,
+      changedTurns: 4,
+      advisory: {
+        verdict: "compact-now",
+        source: "deterministic",
+        confidence: 0.7,
+        breakEvenTurns: 1,
+        perTurnSavings: 0.0123,
+        worthIt: true,
+        pricing: "flat",
+        priceSource: "plan · Xiaomi MiMo Token Plan Max · $100/mo",
+        moneyBasis: "",
+        capacity: { size: 500_000, limit: 1048576, headroom: 548576 },
+        cache: { ratio: 0.95, samples: 8, source: "measured" },
+        estimates: {
+          summaryTokens: 2584,
+          summarySource: "measured",
+          summaryCost: 0.004,
+          summaryCostSource: "measured",
+          rebuildCost: null,
+          rebuildSource: "modelled · at plan rate",
+          plan: {
+            plan: "Xiaomi MiMo Token Plan Max · $100/mo",
+            atPlanRate: true,
+            weightsFor: "mimo-v2.6-pro",
+            keepCredits: 1_200_000,
+            expiry: { hot: 1_250_000, cold: 150_000_000, premium: 148_750_000, ratio: 120 },
+          },
+          lastPrediction: null,
+          predictionError: 0,
+        },
+        projections: [{ turns: 3, net: 0.02, worthIt: true }],
+      },
+    },
+  }
+  const planBurn = {
+    used: 12.4e9,
+    allowance: 82e9,
+    free: 69.6e9,
+    percentUsed: 15.1,
+    projected: 16.2e9,
+    projectedPercent: 19.8,
+    daysLeft: 7,
+    basis: "renews monthly on the configured day",
+    counted: 42,
+    skipped: 0,
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8, planBurn })
+  const lines = report.split("\n")
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(72)
+  expect(report).toContain("Xiaomi MiMo Token Plan Max")
+  expect(report).toContain("12.4B of 82.0B credits (15%")
+  expect(report).toContain("renews monthly on the configured day")
+  expect(report).toContain("projection")
+  expect(report).toContain("days left")
+  expect(report).toContain("per turn")
+  expect(report).toContain("1.2M credits of allowance")
+  expect(report).toContain("cache expiry")
+  expect(report).toContain("150.0M credits to re-bill")
+  expect(report).toContain("120x hot")
+  expect(report).toContain("plan rate · your own credits")
+  expect(report).toContain("in credits")
+})
+
 test("an unpriced model never shows invented money in the report", () => {
   const pin = {
     lastContextSource: "billed",
@@ -379,4 +447,367 @@ test("the TUI slash command does not shadow the host's native /compact", () => {
   expect(command.slash.aliases ?? []).not.toContain("compact")
   expect(command.slash.aliases ?? []).not.toContain("ctx")
   dispose()
+})
+
+/** A context whose dialog answers are scripted and whose output is captured. */
+function scriptedContext(answers = []) {
+  // Isolate config/state and pre-answer billing, so the first-init prompt
+  // never fires and no test can touch the user's real config.
+  const env = tempEnv()
+  fs.writeFileSync(env.OMLX_ROUTER_CONFIG, JSON.stringify({ billing: { payg: true } }))
+  Object.assign(process.env, env)
+  const shown = []
+  const layers = []
+  const context = {
+    data: { on: () => ({ dispose() {} }) },
+    keymap: {
+      layer: (factory) => {
+        layers.push(factory())
+        return () => {}
+      },
+    },
+    ui: {
+      toast: { show: async (input) => shown.push(input.message ?? input) },
+      router: { current: () => ({ type: "session", sessionID: "ses_test" }) },
+      dialog: {
+        alert: async ({ message }) => {
+          shown.push(message)
+        },
+        select: async ({ title, options }) => {
+          shown.push(title)
+          return answers.shift()
+        },
+        prompt: async () => answers.shift(),
+        confirm: async () => answers.shift(),
+      },
+    },
+  }
+  const dispose = tui.setup(context)
+  const run = layers[0].commands[0].run
+  return { run, shown, answers, dispose }
+}
+
+test("/ctx help lists every command with its usage line", async () => {
+  const { run, shown, dispose } = scriptedContext()
+  await run("help")
+  const text = shown.at(-1)
+  for (const name of ["menu", "report", "here", "plan", "help"]) expect(text).toContain(name)
+  expect(text).toContain("/ctx help [command]")
+  for (const line of text.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+  dispose()
+})
+
+test("/ctx help <command> shows usage and detail", async () => {
+  const { run, shown, dispose } = scriptedContext()
+  await run("help here")
+  const text = shown.at(-1)
+  expect(text).toContain("/ctx here")
+  expect(text).toContain("compact this session now")
+  dispose()
+})
+
+test("/ctx help with an unknown command falls back to the listing", async () => {
+  const { run, shown, dispose } = scriptedContext()
+  await run("help frobnicate")
+  const text = shown.at(-1)
+  expect(text).toContain("unknown command: frobnicate")
+  expect(text).toContain("commands")
+  dispose()
+})
+
+test("an unknown /ctx command points at the help", async () => {
+  const { run, shown, dispose } = scriptedContext()
+  await run("frobnicate")
+  expect(shown.at(-1)).toContain("Try /ctx help")
+  dispose()
+})
+
+test("/ctx menu routes its choice and its help picker", async () => {
+  // First select: menu -> Help. Second select: help picker -> "here".
+  const { run, shown, dispose } = scriptedContext(["help", "here"])
+  await run("menu")
+  expect(shown.at(-1)).toContain("/ctx here")
+  dispose()
+})
+
+test("bare /ctx opens the menu", async () => {
+  // The menu choice routes through runCommand like any other entry.
+  const { run, shown, dispose } = scriptedContext(["report"])
+  await run("")
+  expect(shown.at(-1)).toContain("No advisory yet")
+  dispose()
+})
+
+test("/ctx report shows the advisory directly", async () => {
+  const { run, shown, dispose } = scriptedContext()
+  await run("report")
+  expect(shown.at(-1)).toContain("No advisory yet")
+  dispose()
+})
+
+test("/ctx menu closes without running anything", async () => {
+  const { run, shown, dispose } = scriptedContext(["close"])
+  await run("menu")
+  expect(shown.at(-1)).not.toContain("Compaction requested")
+  dispose()
+})
+
+/** The slice of the LimitDex feed the refresh test replays. */
+const FEED = {
+  generatedAt: "2026-11-24T06:17:02.446Z",
+  tools: [
+    {
+      id: "codex",
+      name: "OpenAI Codex (ChatGPT plans)",
+      vendor: "OpenAI",
+      weeklyCapPublished: false,
+      plans: [
+        {
+          name: "Plus",
+          priceUsdMonthly: 20,
+          limitsQuote: "Est. local messages per 5h: GPT-6.1 Sol 15-160",
+          lastVerified: "2026-11-24",
+        },
+      ],
+    },
+  ],
+}
+
+test("/ctx plan refresh copies the feed price and states the missing allowance", async () => {
+  const env = tempEnv()
+  fs.writeFileSync(env.OMLX_ROUTER_CONFIG, JSON.stringify({ billing: { vendor: "openai-codex", tier: "plus", priceUsd: 19 } }))
+  Object.assign(process.env, env)
+  const shown = []
+  const context = { ui: { toast: { show: async (input) => shown.push(input.message ?? input) } } }
+  const config = readConfig({ write: false }).config
+  const merged = await runPlanRefresh(context, config, {
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => FEED }),
+  })
+  // The recorded price is replaced by the feed's, with its check date.
+  expect(merged.billing.priceUsd).toBe(20)
+  expect(merged.billing.source.checked).toBe("2026-11-24")
+  // No allowance is written: the vendor publishes none.
+  expect(merged.billing.allowanceCredits).toBeUndefined()
+  const text = shown.at(-1)
+  expect(text).toContain("not published")
+  expect(text).toContain("no shadow price")
+  expect(text).toContain("Est. local messages")
+  for (const line of text.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+})
+
+test("/ctx plan refresh keeps the recorded facts when the feed is down", async () => {
+  const env = tempEnv()
+  fs.writeFileSync(env.OMLX_ROUTER_CONFIG, JSON.stringify({ billing: { vendor: "openai-codex", tier: "plus" } }))
+  Object.assign(process.env, env)
+  const shown = []
+  const context = { ui: { toast: { show: async (input) => shown.push(input.message ?? input) } } }
+  const config = readConfig({ write: false }).config
+  const merged = await runPlanRefresh(context, config, {
+    fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }),
+  })
+  expect(merged).toBeNull()
+  expect(shown.at(-1)).toContain("unreachable (HTTP 503)")
+  expect(shown.at(-1)).toContain("$20/mo")
+})
+
+test("/ctx plan refresh says so when no plan is recorded", async () => {
+  const env = tempEnv()
+  fs.writeFileSync(env.OMLX_ROUTER_CONFIG, JSON.stringify({}))
+  Object.assign(process.env, env)
+  const shown = []
+  const context = { ui: { toast: { show: async (input) => shown.push(input.message ?? input) } } }
+  const merged = await runPlanRefresh(context, readConfig({ write: false }).config, {
+    fetchImpl: async () => {
+      throw new Error("must not be called")
+    },
+  })
+  expect(merged).toBeNull()
+  expect(shown.at(-1)).toContain("No plan recorded")
+})
+
+test("a report shows each plan its own burn, never one blended figure", () => {
+  const pin = {
+    lastContextSource: "billed",
+    compaction: {
+      verdict: "compact-now",
+      turns: 4,
+      changedTurns: 4,
+      advisory: {
+        verdict: "compact-now",
+        source: "deterministic",
+        confidence: 0.7,
+        breakEvenTurns: 1,
+        perTurnSavings: 0.0123,
+        worthIt: true,
+        pricing: "priced",
+        priceSource: "plan · Xiaomi MiMo Token Plan Max · $100/mo",
+        moneyBasis: "",
+        capacity: { size: 500_000, limit: 1048576, headroom: 548576 },
+        cache: { ratio: 0.95, samples: 8, source: "measured" },
+        estimates: {
+          summaryTokens: 2584,
+          summarySource: "measured",
+          summaryCost: 0.004,
+          summaryCostSource: "measured",
+          rebuildCost: null,
+          rebuildSource: "modelled · at plan rate",
+          plan: {
+            plan: "Xiaomi MiMo Token Plan Max · $100/mo",
+            atPlanRate: true,
+            weightsFor: "mimo-v2.6-pro",
+            keepCredits: 1_200_000,
+            expiry: { hot: 1_250_000, cold: 150_000_000, premium: 148_750_000, ratio: 120 },
+          },
+          lastPrediction: null,
+          predictionError: 0,
+        },
+        projections: [{ turns: 3, net: 0.02, worthIt: true }],
+      },
+    },
+  }
+  const planBurns = [
+    { label: "Xiaomi MiMo Token Plan Max · $100/mo", burn: { used: 12.4e9, allowance: 82e9, percentUsed: 15.1, projected: 16.2e9, daysLeft: 7, basis: "renews monthly on the configured day" } },
+    { label: "ChatGPT Plus · $20/mo · allowance not published", burn: null },
+  ]
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8, planBurns })
+  const lines = report.split("\n")
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(72)
+  // Both plans are named.
+  expect(report).toContain("Xiaomi MiMo Token Plan Max")
+  expect(report).toContain("ChatGPT Plus · $20/mo · allowance not published")
+  // Only the priced plan carries a burn figure.
+  expect(report).toContain("12.4B of 82.0B credits (15%")
+  expect(report).not.toContain("of  credits")
+  // The unpriced plan's allowance note is on screen, not silently dropped.
+  expect(report).toContain("allowance not published")
+})
+
+test("/ctx plan refresh updates each tracked plan in place, never across records", async () => {
+  const env = tempEnv()
+  fs.writeFileSync(
+    env.OMLX_ROUTER_CONFIG,
+    JSON.stringify({
+      billing: [
+        { vendor: "xiaomi-mimo", tier: "max", renewsDay: 1 },
+        { vendor: "openai-codex", tier: "plus", renewsDay: 1, priceUsd: 19 },
+      ],
+    }),
+  )
+  Object.assign(process.env, env)
+  const shown = []
+  const context = { ui: { toast: { show: async (input) => shown.push(input.message ?? input) } } }
+  const config = readConfig({ write: false }).config
+  const merged = await runPlanRefresh(context, config, {
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => FEED }),
+  })
+  const [mimo, chatgpt] = merged.billing
+  // ChatGPT's price comes from the feed; MiMo has no feed and keeps its own.
+  expect(chatgpt.priceUsd).toBe(20)
+  expect(chatgpt.source.checked).toBe("2026-11-24")
+  expect(mimo.vendor).toBe("xiaomi-mimo")
+  expect(mimo.tier).toBe("max")
+  // Both plans survive: one is never replaced by the other.
+  expect(merged.billing).toHaveLength(2)
+  const text = shown.at(-1)
+  expect(text).toContain("ChatGPT Plus")
+  expect(text).toContain("not published by the vendor")
+})
+
+test("the cost of compacting is named as the KV-cache invalidation", () => {
+  // The invalidation dwarfs the summary (20x in the MiMo case), so it is the
+  // figure that decides whether a compaction pays — the EOQ setup cost K.
+  const pin = {
+    lastContextSource: "billed",
+    compaction: {
+      verdict: "compact-now",
+      turns: 4,
+      changedTurns: 4,
+      advisory: {
+        verdict: "compact-now",
+        source: "deterministic",
+        confidence: 0.7,
+        breakEvenTurns: 2,
+        perTurnSavings: 0.0115,
+        invalidationCost: 0.0172,
+        summaryCost: 0.0009,
+        worthIt: true,
+        pricing: "priced",
+        priceSource: "plan · Xiaomi MiMo Token Plan Max · $100/mo",
+        moneyBasis: "",
+        capacity: { size: 500_000, limit: 1048576, headroom: 548576 },
+        cache: { ratio: 0.95, samples: 8, source: "measured" },
+        estimates: { summaryTokens: 2584, summarySource: "measured", summaryCost: 0.0009, summaryCostSource: "measured", rebuildCost: null, rebuildSource: "modelled · at plan rate", plan: { plan: "Xiaomi MiMo Token Plan Max · $100/mo", atPlanRate: true }, lastPrediction: null, predictionError: 0 },
+        projections: [{ turns: 3, net: 0.02, worthIt: true }],
+      },
+    },
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
+  // The cost is shown, and named for what it is.
+  expect(report).toContain("cost to compact")
+  expect(report).toContain("$0.0172")
+  expect(report).toContain("KV-cache invalidation")
+  // It leads the economics: the cost before the payback.
+  const lines = report.split("\n")
+  const costLine = lines.findIndex((l) => l.includes("cost to compact"))
+  const breakLine = lines.findIndex((l) => l.includes("break-even"))
+  expect(costLine).toBeGreaterThan(-1)
+  expect(costLine).toBeLessThan(breakLine)
+})
+
+test("on a plan the real cost is shown in credits, not hidden in dollars", () => {
+  // On a plan the dollar figures are near zero (tiny shadow price × big token
+  // count), so the KV-cache invalidation reads as $0.0172 and looks trivial.
+  // In credits it is 148.8M — the number that decides whether to compact.
+  const pin = {
+    lastContextSource: "billed",
+    compaction: {
+      verdict: "compact-now",
+      turns: 4,
+      changedTurns: 4,
+      advisory: {
+        verdict: "compact-now",
+        source: "deterministic",
+        confidence: 0.7,
+        breakEvenTurns: 13,
+        perTurnSavings: 0.0115,
+        invalidationCost: 0.0172,
+        summaryCost: 0.0009,
+        worthIt: true,
+        planEconomics: {
+          unit: "credits",
+          invalidationCost: 148_750_000,
+          perTurnSavings: 1_125_000,
+          breakEvenTurns: 13,
+          worthIt: true,
+          summaryCost: 720_000,
+        },
+        pricing: "priced",
+        priceSource: "plan · Xiaomi MiMo Token Plan Max · $100/mo",
+        moneyBasis: "",
+        capacity: { size: 500_000, limit: 1048576, headroom: 548576 },
+        cache: { ratio: 0.95, samples: 8, source: "measured" },
+        estimates: { summaryTokens: 2584, summarySource: "measured", summaryCost: 0.0009, summaryCostSource: "measured", rebuildCost: null, rebuildSource: "modelled · at plan rate", plan: { plan: "Xiaomi MiMo Token Plan Max · $100/mo", atPlanRate: true }, lastPrediction: null, predictionError: 0 },
+        projections: [{ turns: 3, net: 0.02, worthIt: true }],
+      },
+    },
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
+  for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+  // The credit figures are on screen and named for what they are.
+  expect(report).toContain("plan credits")
+  expect(report).toContain("148.8M credits · KV-cache invalidation")
+  expect(report).toContain("1.1M credits")
+  expect(report).toContain("the credits your plan actually burns")
+})
+
+test("no plan means no plan-credit section, not a zero one", () => {
+  const pin = {
+    lastContextSource: "billed",
+    compaction: {
+      verdict: "compact-now", turns: 4, changedTurns: 4,
+      advisory: { verdict: "compact-now", source: "deterministic", confidence: 0.7, breakEvenTurns: 2, perTurnSavings: 0.01, invalidationCost: 0.017, worthIt: true, pricing: "priced", priceSource: "catalog · deepseek/deepseek-flash", moneyBasis: "", capacity: { size: 500_000, limit: 1048576, headroom: 548576 }, cache: { ratio: 0.95, samples: 8, source: "measured" }, estimates: { summaryTokens: 2584, summarySource: "measured", lastPrediction: null, predictionError: 0 }, projections: [] },
+    },
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
+  expect(report).not.toContain("plan credits")
 })

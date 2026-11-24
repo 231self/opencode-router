@@ -89,6 +89,50 @@ the request (`last /ctx here`, `outcome accepted` or `failed · http 409`), and
 only a status code or an error name is ever persisted — an error message may
 echo prompt text. The request never repeats on its own.
 
+**Plan billing.** A flat-rate plan charges no cash per token, but every token
+burns a share of a finite allowance. `/ctx plan` sets up the plan facts (price,
+allowance, credit weights) — either from the built-in catalog of published
+tiers (Xiaomi MiMo Token Plan, ChatGPT plans) or typed in by hand — and records
+them in the config with their source and check date. On first load with a
+flat-plan model and no billing recorded, the plugin asks once; "skip" and "pay
+per token" are recorded too, so the question never repeats. With a plan
+recorded, `/ctx` prices the economics in plan credits at your own rates (`basis
+plan rate · your own credits`), shows the allowance burn (`12.4B of 82.0B
+credits (15% · renews monthly)`), and prices a cache expiry as the credit
+premium it charges over staying hot. Plan prices are your own bill, so unlike a
+sibling's list price they may veto a compaction that does not pay.
+
+Several plans can be recorded at once. `/ctx plan` adds a plan beside the ones
+already on file rather than replacing them, and every plan is attributed to the
+models it covers — the catalog's weight table says so for Xiaomi, a `models`
+list says so for anything else. The sidebar and `/ctx report` show each plan
+its own burn, because one blended figure would hide which allowance is the one
+running out. A model no plan claims keeps its catalog price.
+
+Not every plan can be priced. A usage-window plan (the ChatGPT ones, for
+example) publishes a monthly price and limits like "5x more usage per 5-hour
+session", never a token allowance. There is then no `N` to divide the price by,
+so the tool records the plan by name and price, says `allowance not published`,
+and computes no shadow price for it. That is a recorded plan, not a guess.
+
+Which prices apply to a model is decided in one shared place,
+`@231self/opencode-shared/cost-resolution.js`, used by this plugin and the
+router alike: plan, then the public price table, then the model's own catalog
+price, then a sibling entry, then none. The catalog sits below the public
+table because it is the host's own opinion of a price and is not always right;
+a published rate is checkable, so it wins whenever both speak. The rule carries
+the `ownBill` flag that decides whether money may veto — your own bill may, a
+stand-in at someone else's list price may not.
+
+**`/ctx plan refresh`** re-reads the plan's price from a public tracker feed.
+[LimitDex](https://limitdex.com) publishes its dataset as free JSON, read once
+a day from vendor pricing pages, with the vendor's exact limit wording and a
+check date. The command is the only path to the network: nothing is fetched on
+a turn, a failure keeps the facts already recorded, and the reply shows what
+the feed read (`$20/mo · read 2026-11-24`) beside whether the allowance is
+published. The feed can confirm a price; it cannot supply an allowance that
+does not exist in public.
+
 The compacted size and the one-time cost are calibrated from real compactions.
 After a compaction the plugin observed as it happened, it compares its
 prediction with the size that actually followed and keeps the rolling error. A
@@ -100,12 +144,34 @@ modelled rebuild cost. The summary request is measured from the completed checkp
 own token usage and model when OpenCode supplies them; otherwise its cost is
 estimated from the context it had to read and the summary it produced.
 
-**`/ctx`** in the TUI opens with the current context size and growth, then the
-verdict with its numbers and what to do about it. **`/ctx here`** asks the
+**`/ctx`** in the TUI opens the action menu: report, compact now, plan setup,
+help. **`/ctx report`** shows the advisory directly — the current context
+size and growth, then the verdict with its numbers and what to do about it.
+**`/ctx here`** asks the
 host to compact this session; the
 request clears itself even if the host refuses. OpenCode already has its own
 `/compact`; this plugin leaves that command alone and does not register a
 `compact` alias.
+
+**`/ctx menu`** opens the same menu explicitly.
+**`/ctx plan refresh`** re-reads the plan price from the tracker feed.
+**`/ctx help [command]`** is the command reference: every command with its
+usage line, and naming one command shows its detail. An unrecognised command
+points at the help instead of failing silently.
+
+**Sidebar.** Both plugins add a block to the OpenCode sidebar. The
+compaction block leads with the verdict — `verdict compact now · pays back in
+3 turns`, `verdict keep working`, or `verdict delegate · looks like review` —
+then the evidence behind it: window use (`ctx 500K/1.0M · 52% free`), each
+plan and its allowance burn, and the cache-expiry exposure. The conclusion
+comes first because that is the point of the block; the numbers explain it.
+The router block leads the same way: `running deepseek-flash · kept for cache`
+(or `switched · cheaper`, `pinned by you`, …) — which model this session is on
+and the reason the decision log recorded — then the policy that decided it
+and the evidence: pin, quality score, judge. The blocks
+refresh on model changes and finished turns. Where the host
+has no OpenTUI or no sidebar slot, the blocks are skipped and everything else
+works.
 
 ## Settings
 
@@ -136,6 +202,41 @@ In `~/.config/omlx-router/config.json`:
 | `cacheWindow` | `5` | Provider steps used for the measured hit rate. |
 | `cacheTtlMs` | `0` | Global cache lifetime override; `0` uses the provider table. |
 | `cacheTtlByProvider` | Anthropic/OpenAI 5 min | Per-provider idle expiry; `0` disables it. |
+
+Plan billing lives in the same file, one level up:
+
+```json
+{
+  "billing": [
+    { "vendor": "xiaomi-mimo", "tier": "max", "renewsDay": 1 },
+    { "vendor": "openai-codex", "tier": "plus", "renewsDay": 1 }
+  ]
+}
+```
+
+`billing` is a list of plans — one entry per subscription you pay for. A
+single record still works and is read as a list of one. `/ctx plan` writes the
+list for you and appends to it; running it again adds another plan rather than
+replacing what is there. Each plan is attributed to the models it covers, so
+every model is priced at its own plan's rates.
+
+Each entry names a built-in catalog entry (`vendor` and `tier` — published
+Xiaomi MiMo Token Plan tiers and ChatGPT plans, with source and check date)
+or carries its own numbers instead: `name`, `priceUsd`, `allowanceCredits`
+(or `allowanceTokens`), `weights` (`cacheHitInput`, `cacheMissInput`,
+`output`), `models` (which models the plan covers), `renewsDay`, and `source`.
+Leave the allowance out for a plan that publishes none:
+
+```json
+{ "billing": [{ "vendor": "openai-codex", "tier": "plus", "renewsDay": 1 }] }
+```
+
+That record is kept and shown as `ChatGPT Plus · $20/mo · allowance not
+published`. No burn percentage and no shadow price are computed for it,
+because the vendor publishes no token allowance to divide by. `"billing": {
+"payg": true }` records pay-per-token and `{ "skipped": true }` records an
+explicit skip; both suppress the first-init question. The record never
+contains credentials or prompt text.
 
 The file is read as strict JSON, so keep comments out of it.
 

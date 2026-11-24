@@ -1,15 +1,34 @@
-import fs from "node:fs"
-import path from "node:path"
-
-import { normaliseCost } from "@231self/opencode-shared/cost.js"
-import { normalizeModelName } from "./quality.js"
-import { stateRoot, writeJsonAtomic } from "@231self/opencode-shared/state.js"
-
 /**
- * Public price tables. None of these need an access token:
+ * Fetch side of the public price table.
+ *
+ * The read side lives in `@231self/opencode-shared/price-table.js` so both
+ * plugins read one cached table; this module owns fetching it from the public
+ * sources and writing the cache. No source needs an access token:
  * - models.dev — the catalogue OpenCode itself reads
  * - LiteLLM — per-token costs keyed by model name, with a provider hint
  */
+import fs from "node:fs"
+
+import {
+  loadPricing,
+  normalizeModelName,
+  priceForModel,
+  pricingCachePath,
+  pricingSource,
+  readPricingCache,
+} from "@231self/opencode-shared/price-table.js"
+import { normaliseCost } from "@231self/opencode-shared/cost.js"
+import { writeJsonAtomic } from "@231self/opencode-shared/state.js"
+
+export {
+  loadPricing,
+  normalizeModelName,
+  priceForModel,
+  pricingCachePath,
+  pricingSource,
+  readPricingCache,
+}
+
 export const PRICING_SOURCES = {
   modelsdev: { url: "https://models.dev/api.json" },
   litellm: {
@@ -17,15 +36,6 @@ export const PRICING_SOURCES = {
   },
 }
 const DEFAULT_ORDER = ["modelsdev", "litellm"]
-
-export function pricingCachePath(env = process.env) {
-  return env.OMLX_ROUTER_PRICING_CACHE || path.join(stateRoot(env), "pricing.json")
-}
-
-export function pricingSource(config) {
-  const source = config?.pricing?.source ?? "modelsdev"
-  return ["modelsdev", "off"].includes(source) ? source : "modelsdev"
-}
 
 export function pricingOrder(config) {
   if (pricingSource(config) === "off") return []
@@ -81,19 +91,10 @@ export function buildPricesFromLiteLLM(api) {
       cache_read: Number.isFinite(Number(entry.cache_read_input_token_cost))
         ? perMillion(entry.cache_read_input_token_cost)
         : undefined,
-      cache_write: Number.isFinite(Number(entry.cache_creation_input_token_cost))
-        ? perMillion(entry.cache_creation_input_token_cost)
-        : undefined,
     })
-    if (tiers.length === 0) continue
     const providerID = typeof entry.litellm_provider === "string" ? entry.litellm_provider : ""
-    const id = normalizeModelName(modelID)
-    if (providerID) {
-      const key = `${providerID}/${modelID}`
-      if (!prices[key]) prices[key] = tiers
-    }
-    if (id && !byId[id]) byId[id] = tiers
-    count += 1
+    const key = providerID ? `${providerID}/${modelID}` : modelID
+    if (record(prices, byId, key, normalizeModelName(modelID), tiers)) count += 1
   }
   return { prices, byId, count }
 }
@@ -101,16 +102,6 @@ export function buildPricesFromLiteLLM(api) {
 const BUILDERS = {
   modelsdev: buildPricesFromModelsDev,
   litellm: buildPricesFromLiteLLM,
-}
-
-export function readPricingCache(env = process.env) {
-  try {
-    const raw = JSON.parse(fs.readFileSync(pricingCachePath(env), "utf8"))
-    if (!raw || typeof raw !== "object" || !raw.prices) return null
-    return raw
-  } catch {
-    return null
-  }
 }
 
 export function writePricingCache(cache, env = process.env) {
@@ -184,19 +175,4 @@ export async function refreshPricingIfStale({ config, env = process.env, fetchIm
   const cache = readPricingCache(env)
   if (!pricingIsStale(config, cache)) return cache
   return refreshPricing({ config, env, fetchImpl })
-}
-
-/** Pricing fallback for routing and display; null when disabled or uncached. */
-export function loadPricing({ config, env = process.env } = {}) {
-  if (pricingSource(config) === "off") return null
-  return readPricingCache(env)
-}
-
-/** External tiers for one catalog model, or null when the sources have none. */
-export function priceForModel(prices, model) {
-  if (!prices) return null
-  const id = model?.id ?? model?.modelID
-  if (!id) return null
-  const key = model?.providerID ? `${model.providerID}/${id}` : ""
-  return (key && prices.prices?.[key]) || prices.byId?.[normalizeModelName(id)] || null
 }

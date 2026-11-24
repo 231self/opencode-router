@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { costSource, mergeCost, normaliseCost } from "@231self/opencode-shared/cost.js"
+import { resolveCost } from "@231self/opencode-shared/cost-resolution.js"
 import { priceForModel } from "./pricing.js"
 import { qualityForModel } from "./quality.js"
 
@@ -161,9 +161,17 @@ export function resolvePool({
       id,
       name: model.name,
     })
-    const catalogCost = normaliseCost(model.cost)
     const externalCost = priceForModel(prices, { providerID: model.providerID, id, name: model.name })
-    const cost = mergeCost(catalogCost, externalCost)
+    // One shared rule decides whose prices apply: a configured plan (the
+    // user's own bill) comes first, then the public price table, then the
+    // host catalog. Local models burn no allowance and stay free.
+    const resolved = resolveCost({
+      model,
+      billing: config?.billing,
+      listPrice: externalCost,
+      local,
+    })
+    const cost = resolved.tiers
     return {
       providerID: model.providerID,
       modelID: id,
@@ -171,7 +179,7 @@ export function resolvePool({
       variant,
       local,
       cost,
-      costSource: costSource(catalogCost, externalCost),
+      costSource: resolved.source,
       limit: {
         context: Number(model.limit?.context) || 0,
         ...(Number(model.limit?.input) > 0 ? { input: Number(model.limit.input) } : {}),

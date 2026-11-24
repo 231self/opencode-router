@@ -69,6 +69,61 @@ function envWithFavorites(favorites, variant = {}) {
   return { OMLX_ROUTER_FAVORITES: file }
 }
 
+test("a configured plan prices the models it covers at plan rates", () => {
+  const models = [
+    ...catalog(),
+    {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      name: "MiMo V2.6 Pro",
+      type: "chat",
+      settings: { baseURL: "https://plan.example.com/v1" },
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 1048576, output: 8192 },
+      capabilities: { tools: true, input: ["text"], output: ["text"] },
+      status: "active",
+    },
+    {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "uncovered-model",
+      name: "Uncovered",
+      type: "chat",
+      settings: { baseURL: "https://plan.example.com/v1" },
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 131072, output: 8192 },
+      capabilities: { tools: true, input: ["text"], output: ["text"] },
+      status: "active",
+    },
+  ]
+  const env = envWithFavorites([
+    { providerID: "xiaomi-token-plan-sgp", modelID: "mimo-v2.6-pro" },
+    { providerID: "xiaomi-token-plan-sgp", modelID: "uncovered-model" },
+    { providerID: "omlx", modelID: "local-4b" },
+    { providerID: "deepseek", modelID: "deepseek-flash" },
+  ])
+  const { pool } = resolvePool({
+    models,
+    config: config({ billing: { vendor: "xiaomi-mimo", tier: "max" } }),
+    env,
+  })
+  const mimo = pool.find((model) => model.modelID === "mimo-v2.6-pro")
+  // Plan shadow prices at Max rates: $0.366/M input, $0.732/M output.
+  expect(mimo.costSource).toBe("plan")
+  expect(mimo.cost[0].input).toBeCloseTo(0.366, 3)
+  expect(mimo.cost[0].output).toBeCloseTo(0.732, 3)
+  // The plan has no weights for this model: it keeps catalog prices.
+  const uncovered = pool.find((model) => model.modelID === "uncovered-model")
+  expect(uncovered.costSource).toBe("catalog")
+  expect(uncovered.cost[0].input).toBe(0)
+  // A local model burns no allowance and stays free.
+  const local = pool.find((model) => model.modelID === "local-4b")
+  expect(local.costSource).not.toBe("plan")
+  // A model outside the plan keeps its catalog prices.
+  const flash = pool.find((model) => model.modelID === "deepseek-flash")
+  expect(flash.costSource).toBe("catalog")
+  expect(flash.cost[0].input).toBe(0.2)
+})
+
 test("favorites resolve against the catalog with variant and local flag", () => {
   const env = envWithFavorites(
     [

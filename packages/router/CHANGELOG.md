@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0 — 2026-11-24
+
+### Added
+
+- Plan-aware routing. With a plan billing record configured (the compaction
+  plugin's `/ctx plan` writes it), the models the plan covers are scored at
+  the plan's own shadow prices — plan credits are what the user actually
+  spends, so they outrank catalog and reference prices. Marked `plan rate`
+  in `/router pool`. Local models stay free: they burn no allowance.
+- `/router plan` records the plan from the router side, so plan-aware routing
+  no longer depends on the compaction plugin being installed. Providers come
+  from the shared plan catalog; a plan already on file is added beside, never
+  replaced. A plan whose vendor publishes a dollar budget (GitHub Copilot,
+  Replit) is priced against the model's own list price.
+- Sidebar block: leads with the router's own decision — `running
+  deepseek-flash · kept for cache`, `switched · cheaper`, `pinned by you` —
+  then the policy that decided it and the evidence (pin, quality score,
+  judge). The conclusion is the point of the block; the numbers explain it.
+  Refreshes on model changes and finished turns.
+
+### Changed
+
+- A plan with no published allowance (a usage-window plan such as ChatGPT
+  Plus) contributes no shadow price, so the models it covers keep catalog
+  prices instead of being priced at a rate that does not exist.
+- Model cost resolution moved to `@231self/opencode-shared/cost-resolution.js`,
+  shared with the compaction plugin. The router's pool and the advisory's
+  economics now read one precedence (plan, catalog, fallback, none) and one
+  `ownBill` flag, so the two can never price the same model differently.
+
 ## 0.3.6 — 2026-11-23
 
 ### Changed

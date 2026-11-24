@@ -71,6 +71,7 @@ export function guardAllows({ guard, verdict, confidence, instability = 0, baseC
 export function composeAdvisory({
   structural,
   roi,
+  planRoi = null,
   refined = null,
   guard = null,
   instability = 0,
@@ -106,7 +107,13 @@ export function composeAdvisory({
   // reference price from a sibling catalog entry is a projection, and a
   // projection must not veto an action whose real marginal cost is zero: on a
   // flat plan the binding constraint is the context window, not the bill.
-  if (verdict === "compact-now" && roi && !roi.worthIt && !moneyBasis) {
+  //
+  // On a plan the credit figures are the real constraint: the KV-cache
+  // invalidation is what actually leaves the allowance, and the dollar figure
+  // for it is near zero and hides that. So the credit verdict is the one that
+  // vetoes there. Without a plan, dollars are the measure and they veto.
+  const economics = planRoi ?? roi
+  if (verdict === "compact-now" && economics && !economics.worthIt && !moneyBasis) {
     verdict = "not-yet"
     confidence = Math.min(confidence, 0.6)
     source = source === "guard" ? "guard+economics" : "economics"
@@ -120,6 +127,25 @@ export function composeAdvisory({
     // computed" rather than print a break-even the code refused to invent.
     breakEvenTurns: roi ? roi.breakEvenTurns : null,
     perTurnSavings: roi ? roi.perTurnSavings : null,
+    // The one-time cost of compacting — mostly the KV-cache invalidation,
+    // the cold re-prefill at cache-write rates, which runs ~120x a cache
+    // read. It dwarfs the summary cost, so it is the figure that decides
+    // whether a compaction pays: this is the EOQ setup cost K.
+    invalidationCost: roi ? roi.invalidationCost : null,
+    // The same trade in credits, when a plan covers this model. On a plan the
+    // dollar figures are near zero and hide the real cost; credits are the
+    // resource the allowance burns, so this is the honest measure. Null when
+    // no plan prices the model.
+    planEconomics: planRoi
+      ? {
+          unit: "credits",
+          invalidationCost: planRoi.invalidationCost,
+          perTurnSavings: planRoi.perTurnSavings,
+          breakEvenTurns: planRoi.breakEvenTurns,
+          worthIt: planRoi.worthIt,
+          summaryCost: planRoi.summaryCost,
+        }
+      : null,
     worthIt: roi ? roi.worthIt : null,
     pricing: pricing ?? (roi ? "priced" : "unknown"),
     priceSource: priceSource ?? null,

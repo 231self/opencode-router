@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 
 import { advise, nextGuard } from "../src/advise.js"
+import { composeAdvisory } from "../src/advisory.js"
 
 const PRICED_MODEL = {
   providerID: "deepseek",
@@ -248,6 +249,117 @@ test("a projection at list price never vetoes a structural compaction", async ()
   expect(advisory.verdict).toBe("compact-now")
 })
 
+const PLAN = {
+  vendor: "xiaomi-mimo",
+  tier: "max",
+  renewsDay: 1,
+}
+
+test("a configured plan prices the economics at the user's own rates", async () => {
+  // Plan credits are the user's bill, so no sibling reference is needed and
+  // the money is not a projection.
+  const { advisory } = await advise({
+    config: {
+      compaction: { expectedTurns: 8, horizons: [3, 8, 15] },
+      pin: { cacheHitRatio: 0.95 },
+      billing: PLAN,
+    },
+    model: {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 1048576, output: 8192 },
+    },
+    messages: BOUNDARY,
+    measuredTokens: 500_000,
+    estimatedTokens: 500_000,
+    previousTokens: 400_000,
+  })
+  expect(advisory.priceSource).toBe("plan · Xiaomi MiMo Token Plan Max · $100/mo")
+  // The user's own prices: empty basis, so they may veto like catalog prices.
+  expect(advisory.moneyBasis).toBe("")
+  expect(advisory.worthIt).toBe(true)
+  expect(advisory.breakEvenTurns).toBeLessThanOrEqual(8)
+})
+
+test("plan estimates carry the credit costs and the expiry premium", async () => {
+  const { advisory } = await advise({
+    config: {
+      compaction: { expectedTurns: 8 },
+      pin: { cacheHitRatio: 0.95 },
+      billing: PLAN,
+    },
+    model: {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 1048576, output: 8192 },
+    },
+    messages: BOUNDARY,
+    measuredTokens: 500_000,
+    estimatedTokens: 500_000,
+    previousTokens: 400_000,
+  })
+  const plan = advisory.estimates.plan
+  expect(plan.plan).toBe("Xiaomi MiMo Token Plan Max · $100/mo")
+  expect(plan.keepCredits).toBe(500_000 * 2.5)
+  expect(plan.expiry.cold).toBe(500_000 * 300)
+  expect(plan.expiry.ratio).toBe(120)
+})
+
+test("plan rates may veto a compaction that does not pay", async () => {
+  // Unlike a list-price projection, plan credits are what the user spends, so
+  // an unprofitable compaction is vetoed at plan rates too.
+  const { advisory } = await advise({
+    config: {
+      compaction: { expectedTurns: 1, summaryTokens: 4000 },
+      pin: { cacheHitRatio: 0.95 },
+      billing: PLAN,
+    },
+    model: {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "mimo-v2.6-pro",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 1048576, output: 8192 },
+    },
+    messages: BOUNDARY,
+    measuredTokens: 30_000,
+    estimatedTokens: 30_000,
+    previousTokens: 10_000,
+  })
+  expect(advisory.moneyBasis).toBe("")
+  expect(advisory.worthIt).toBe(false)
+  expect(advisory.verdict).toBe("not-yet")
+  expect(advisory.source).toContain("economics")
+})
+
+test("a plan with no weights for this model falls back to the reference", async () => {
+  const { advisory } = await advise({
+    config: {
+      compaction: { expectedTurns: 8 },
+      pin: { cacheHitRatio: 0.95 },
+      billing: PLAN,
+    },
+    model: {
+      providerID: "xiaomi-token-plan-sgp",
+      id: "some-other-model",
+      cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      limit: { context: 1048576, output: 8192 },
+    },
+    reference: {
+      providerID: "xiaomi",
+      id: "some-other-model",
+      cost: [{ input: 0.435, output: 0.87, cache: { read: 0.0036, write: 0 } }],
+    },
+    messages: BOUNDARY,
+    measuredTokens: 500_000,
+    estimatedTokens: 500_000,
+    previousTokens: 400_000,
+  })
+  expect(advisory.moneyBasis).toBe("at list price")
+  expect(advisory.priceSource).toBe("list price · xiaomi/some-other-model")
+})
+
 test("a model with no price entry is unknown, not free", async () => {
   const { advisory } = await advise({
     config: { compaction: { expectedTurns: 8, horizons: [3, 8] }, pin: { cacheHitRatio: 0.8 } },
@@ -342,4 +454,22 @@ test("the guard carries its turn bookkeeping across advisories", () => {
   expect(held).toEqual({ verdict: "not-yet", turns: 2, changedTurns: 1 })
   const changed = nextGuard(held, { verdict: "compact-now" })
   expect(changed).toEqual({ verdict: "compact-now", turns: 3, changedTurns: 3 })
+})
+
+test("on a plan the credit figures veto, not the near-zero dollars", () => {
+  // The dollar ROI can say "worth it" while the credit ROI says the opposite:
+  // on a plan the dollar figures are a tiny shadow price times a big token
+  // count, so the KV-cache invalidation looks like $0.0172 and trivial. In
+  // credits it is the real cost. The verdict must follow the real one.
+  const structural = { verdict: "compact-now", confidence: 0.9, signals: { complexity: 2, contextTokens: 500_000, growth: 1000 } }
+  const dollars = { perTurnSavings: 0.01, invalidationCost: 0.02, breakEvenTurns: 2, worthIt: true, summaryCost: 0.001 }
+  const credits = { perTurnSavings: 1_000, invalidationCost: 2_000_000, breakEvenTurns: 2000, worthIt: false, summaryCost: 720_000 }
+
+  // Dollars say yes, credits say no → the credit verdict wins on a plan.
+  const onPlan = composeAdvisory({ structural, roi: dollars, planRoi: credits, moneyBasis: "" })
+  expect(onPlan.verdict).toBe("not-yet")
+
+  // No plan: the dollar verdict is the only one, and it stands.
+  const noPlan = composeAdvisory({ structural, roi: dollars, planRoi: null, moneyBasis: "" })
+  expect(noPlan.verdict).toBe("compact-now")
 })

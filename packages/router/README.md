@@ -15,7 +15,7 @@ a model that will fail it.
 
 </div>
 
-> **Status: v0.3.6.** Routing, subagent policy, the TUI `/router` surface,
+> **Status: v0.4.0.** Routing, subagent policy, the TUI `/router` surface,
 > per-turn timing, the CLI, and the Kilo shim are implemented and tested. The
 > context optimiser moved to
 > [`@231self/opencode-compaction`](https://www.npmjs.com/package/@231self/opencode-compaction)
@@ -234,7 +234,19 @@ and review floored at 3. Trivial turns skip the judge entirely.
 4. **Expected cost.** Input plus expected output at the model's context tier,
    with a cache-read discount: the measured cache-hit share of the session's
    last turn when the pinned model served it (a fresh pin is priced cold), or
-   `pin.cacheHitRatio` (0.8) when nothing is measured yet.
+   `pin.cacheHitRatio` (0.8) when nothing is measured yet. With a plan billing
+   record configured (`/router plan`, or the compaction plugin's `/ctx plan`),
+   the models the plan covers are priced at the plan's own shadow prices —
+   plan credits are what the user actually spends — and marked `plan rate` in
+   `/router pool`. A plan that publishes a dollar budget rather than a token
+   count (GitHub Copilot) is priced against the model's own list price: the
+   budget buys `allowanceUsd / listPrice` tokens, so the model costs list ×
+   `priceUsd / allowanceUsd`. A plan with no published allowance has no
+   shadow price, so it changes no price: those models keep catalog prices.
+   Local models stay free: they burn no allowance. This precedence is not
+   decided here — it lives in `@231self/opencode-shared/cost-resolution.js`,
+   which the compaction plugin calls too, so a model's price is one fact
+   shared by both.
 5. **Policy weights.**
 
 | Policy | Cost | Quality | Latency | Use when |
@@ -244,6 +256,13 @@ and review floored at 3. Trivial turns skip the judge entirely.
 | `latency` | 0.2 | 0.2 | 0.6 | Interactive work; favours local and flash tiers |
 
 Changing the policy clears pins so the next turn is scored from scratch.
+
+### Sidebar
+
+The router adds a block to the OpenCode sidebar showing this session's model,
+pin source, policy, judge, and quality score. It refreshes on model changes
+and finished turns. Where the host has no OpenTUI or no sidebar slot, the
+block is skipped and everything else works.
 
 ### Custom weights
 
@@ -806,6 +825,7 @@ the CLI for headless `opencode run`/`serve`, OpenCode Desktop, and Kilo.
 | `/router policy` | Interactive picker for `cost` / `quality` / `latency`, or custom weights; clears pins |
 | `/router retention [cache\|balanced\|switch]` | How long the router keeps a model: cache reuse, balanced, or switch every turn; `pin-mode` still works |
 | `/router pool` | Interactive pool setup: favorites, explicit list, or all available; shows context, cost, and quality per model |
+| `/router plan` | Record the plans you pay for; covered models are priced at their shadow prices |
 | `/router pricing [refresh]` | Input, output, and cache-read prices per pool model, with the price source |
 | `/router pins [clear]` | Sessions with automatic routing state; list or clear |
 | `/router history [n]` | Recent decisions, including subagents and judge/route time |

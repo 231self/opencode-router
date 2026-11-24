@@ -1,5 +1,6 @@
 import { readPin, sessionHash, writePin } from "@231self/opencode-shared/state.js"
 import { referencePrice } from "@231self/opencode-shared/cost.js"
+import { loadPricing, priceForModel } from "@231self/opencode-shared/price-table.js"
 import { sameModel, refOf } from "@231self/opencode-shared/refs.js"
 import {
   countContextTokens,
@@ -98,6 +99,11 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
     // sibling entry. That reference lets the economics still speak; the report
     // names the provider so it is never read as the user's own bill.
     const reference = referencePrice(model, catalog)
+    // A public price table ranks above the host catalog: it is a published
+    // rate, where the catalog is the host's own opinion. Read-only here; the
+    // router is what refreshes the cache.
+    const priceTable = loadPricing({ config })
+    const listPrice = priceForModel(priceTable, model)
     let tokens = null
     let optimiser = null
     let overflow = false
@@ -297,6 +303,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
           config,
           model,
           reference,
+          listPrice,
           messages: event.messages ?? [],
           measuredTokens,
           estimatedTokens,

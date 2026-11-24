@@ -1,6 +1,6 @@
 {
   "name": "@231self/opencode-shared",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Shared runtime for the opencode-router packages: cache-aware pricing and token measurement, config/state host adapters, and the Kilo context shim.",
   "type": "module",
   "license": "Apache-2.0",
@@ -16,6 +16,12 @@
   },
   "exports": {
     "./cost.js": "./src/cost.js",
+    "./plan.js": "./src/plan.js",
+    "./plan-feed.js": "./src/plan-feed.js",
+    "./price-table.js": "./src/price-table.js",
+    "./cost-resolution.js": "./src/cost-resolution.js",
+    "./plan-wizard.js": "./src/plan-wizard.js",
+    "./sidebar.js": "./src/sidebar.js",
     "./tokens.js": "./src/tokens.js",
     "./config.js": "./src/config.js",
     "./state.js": "./src/state.js",
