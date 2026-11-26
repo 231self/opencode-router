@@ -52,6 +52,9 @@ function pickDecision(decision) {
     reason: String(decision?.reason ?? ""),
     stage: String(decision?.stage ?? ""),
     turnClass: String(decision?.turnClass ?? ""),
+    policy: String(decision?.policy ?? ""),
+    complexity: Number(decision?.complexity) || 0,
+    applied: String(decision?.applied ?? ""),
     error: String(decision?.error ?? "").slice(0, 200),
   }
 }
@@ -140,25 +143,35 @@ export function buildDecisions({ decisions = [], scope = "all", session = null, 
   return { scope, items }
 }
 
-/** Per-day aggregates: turns, bucket tokens, and spend at resolved rates. */
+/**
+ * Consumption over time, as buckets and the totals per bucket: turns, the
+ * billed token buckets, and spend at resolved rates. `bucket` is `day`
+ * (the trailing `days` window) or `hour` (the trailing 48 hours) — the
+ * hourly view is for the bar chart's fine grain.
+ */
 export function buildTrends({
   turns = [],
   ratesOf = () => null,
   scope = "all",
   session = null,
   days = 30,
+  bucket = "day",
   now = Date.now(),
 } = {}) {
-  const cutoff = Number(now) - Math.max(1, Number(days) || 30) * 86400000
-  const byDay = new Map()
+  const hourly = bucket === "hour"
+  const spanMs = hourly ? 48 * 3600000 : Math.max(1, Number(days) || 30) * 86400000
+  const cutoff = Number(now) - spanMs
+  const byKey = new Map()
   let unpricedTurns = 0
   for (const turn of scopedTurns(turns, scope, session)) {
     if (!(turn.ts >= cutoff)) continue
-    const date = new Date(turn.ts).toISOString().slice(0, 10)
-    let day = byDay.get(date)
-    if (!day) {
-      day = {
-        date,
+    const key = hourly
+      ? `${new Date(turn.ts).toISOString().slice(0, 13)}:00`
+      : new Date(turn.ts).toISOString().slice(0, 10)
+    let entry = byKey.get(key)
+    if (!entry) {
+      entry = {
+        at: key,
         turns: 0,
         inputTokens: 0,
         outputTokens: 0,
@@ -166,20 +179,26 @@ export function buildTrends({
         cacheWriteTokens: 0,
         spendUsd: 0,
       }
-      byDay.set(date, day)
+      byKey.set(key, entry)
     }
     const tokens = turn.tokens
-    day.turns += 1
-    day.inputTokens += tokens.input
-    day.outputTokens += tokens.output + tokens.reasoning
-    day.cacheReadTokens += tokens.cache.read
-    day.cacheWriteTokens += tokens.cache.write
+    entry.turns += 1
+    entry.inputTokens += tokens.input
+    entry.outputTokens += tokens.output + tokens.reasoning
+    entry.cacheReadTokens += tokens.cache.read
+    entry.cacheWriteTokens += tokens.cache.write
     const spend = turnSpendUsd(turn, ratesOf(turn.usedModel))
     if (spend == null) unpricedTurns += 1
-    else day.spendUsd += spend
+    else entry.spendUsd += spend
   }
-  const daily = [...byDay.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
-  return { scope, days: Math.max(1, Number(days) || 30), daily, unpricedTurns }
+  const buckets = [...byKey.values()].sort((a, b) => (a.at < b.at ? -1 : 1))
+  return {
+    scope,
+    bucket: hourly ? "hour" : "day",
+    window: hourly ? 48 : Math.max(1, Number(days) || 30),
+    buckets,
+    unpricedTurns,
+  }
 }
 
 /** Pool models with their scoped unit price. */

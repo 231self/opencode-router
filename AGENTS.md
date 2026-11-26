@@ -58,6 +58,24 @@ verdict-noise band), `bun run compaction:calibrate --repeat 3` (writes the
 compaction-verdict instability band), `bun run routing:eval`,
 `bun run quality:eval`.
 
+### Host integration check (plugin-facing changes)
+
+The workspace tests do not exercise the OpenCode host's plugin loader. A
+long-running service caches plugin dependency resolution: after changing
+`packages/shared/package.json` (exports or dependency ranges), its hot
+reload can fail with `Cannot find package '@231self/opencode-shared'` even
+though every test passes. Verify plugin-facing changes against the live
+host before calling them done:
+
+```sh
+touch packages/router/src/version.js packages/compaction/src/version.js
+grep -E "failed to load plugin|loading plugin" ~/.local/share/opencode/log/opencode.log | tail
+```
+
+Clean loads show `loading plugin` with no `failed to load plugin` after
+them. On a failure, `opencode service restart` and re-check; a fresh
+service resolves the current tree.
+
 ## Releasing
 
 Publishing happens from CI on a GitHub Release, over npm trusted publishing

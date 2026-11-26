@@ -1,6 +1,8 @@
 /* The dashboard shell: one clean column, system fonts, dark or light
  * following the system. The look borrows ChatGPT's restraint — nothing
- * decorative, the numbers are the content. */
+ * decorative, the numbers are the content. Consumption bars borrow the
+ * DeepSeek dashboard's habit: one bar per period, hover for the exact
+ * figure. */
 
 :root {
   color-scheme: light dark;
@@ -10,6 +12,7 @@
   --text: #0d0d0d;
   --muted: #6b6b6b;
   --accent: #10a37f;
+  --accent-soft: rgba(16, 163, 127, 0.16);
   --warn: #d97706;
   --bar: #f0f0f0;
 }
@@ -22,6 +25,7 @@
     --text: #ececec;
     --muted: #a5a5a5;
     --accent: #19c39c;
+    --accent-soft: rgba(25, 195, 156, 0.2);
     --warn: #f0a24a;
     --bar: #4a4a4a;
   }
@@ -37,7 +41,7 @@ body {
 }
 
 main {
-  max-width: 52rem;
+  max-width: 60rem;
   margin: 0 auto;
   padding: 2rem 1.25rem 4rem;
   display: flex;
@@ -72,14 +76,16 @@ h2 {
   padding: 1.1rem 1.25rem;
 }
 
-nav#scope {
-  margin-top: 0.75rem;
+nav#scope, nav.toggle {
   display: flex;
   gap: 0.5rem;
 }
 
-nav#scope button {
+nav#scope { margin-top: 0.75rem; }
+
+nav button {
   font: inherit;
+  font-size: 0.85rem;
   padding: 0.35rem 0.9rem;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -88,10 +94,18 @@ nav#scope button {
   cursor: pointer;
 }
 
-nav#scope button[aria-pressed="true"] {
+nav button[aria-pressed="true"] {
   background: var(--text);
   border-color: var(--text);
   color: var(--bg);
+}
+
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
 }
 
 .row {
@@ -118,6 +132,7 @@ nav#scope button[aria-pressed="true"] {
   background: var(--bar);
   overflow: hidden;
   margin: 0.4rem 0 0.25rem;
+  min-width: 80px;
 }
 
 .bar > span {
@@ -126,11 +141,143 @@ nav#scope button[aria-pressed="true"] {
   background: var(--accent);
 }
 
-.spark {
+.empty { color: var(--muted); padding: 0.35rem 0; }
+
+/* ---- data tables ------------------------------------------------------ */
+
+.table-wrap { overflow-x: auto; }
+
+.table-tools { margin-bottom: 0.5rem; }
+
+.table-tools input {
+  max-width: 22rem;
   width: 100%;
-  height: 42px;
-  display: block;
-  margin-top: 0.35rem;
 }
 
-.empty { color: var(--muted); padding: 0.35rem 0; }
+input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.32rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+}
+
+input::placeholder { color: var(--muted); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+thead th {
+  border-top: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+th.sortable { cursor: pointer; user-select: none; }
+
+th.sortable:hover { color: var(--text); }
+
+th.sort-asc::after { content: " ↑"; color: var(--accent); }
+
+th.sort-desc::after { content: " ↓"; color: var(--accent); }
+
+th.right, td.right { text-align: right; }
+
+.filter-row th {
+  padding-top: 0;
+  border-top: none;
+}
+
+.filter-row input {
+  font-size: 0.78rem;
+  padding: 0.22rem 0.5rem;
+  width: 100%;
+  min-width: 5.5rem;
+}
+
+tr.expandable { cursor: pointer; }
+
+tr.expandable:hover td { background: var(--accent-soft); }
+
+tr.detail td {
+  white-space: normal;
+  border-top: none;
+  padding-top: 0;
+  background: var(--accent-soft);
+}
+
+.detail .row { padding: 0.3rem 0; }
+
+.detail .row + .row { border-top: none; }
+
+/* ---- consumption chart ------------------------------------------------ */
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 180px;
+  padding: 1.5rem 0 0;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+
+.chart-col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  position: relative;
+  min-width: 3px;
+}
+
+.chart-bar {
+  width: 100%;
+  background: var(--accent);
+  opacity: 0.75;
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+
+.chart-col:hover .chart-bar { opacity: 1; }
+
+.chart-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.chart-col:hover .chart-tip { display: block; }
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding-top: 0.35rem;
+}

@@ -18,13 +18,13 @@
     </header>
 
     <section class="card">
-      <h2>Spend by model</h2>
-      <div id="models"></div>
+      <h2>Plan burn</h2>
+      <div id="plans"></div>
     </section>
 
     <section class="card">
-      <h2>Plan burn</h2>
-      <div id="plans"></div>
+      <h2>Spend by model</h2>
+      <div id="models"></div>
     </section>
 
     <section class="card">
@@ -33,7 +33,19 @@
     </section>
 
     <section class="card">
-      <h2>Trends</h2>
+      <h2>Consumption</h2>
+      <div class="toggle-row">
+        <nav class="toggle" id="trend-metric" aria-label="Metric">
+          <button type="button" data-metric="spendUsd">Spend</button>
+          <button type="button" data-metric="tokens">Tokens</button>
+          <button type="button" data-metric="turns">Turns</button>
+        </nav>
+        <nav class="toggle" id="trend-bucket" aria-label="Granularity">
+          <button type="button" data-bucket="day">Per day</button>
+          <button type="button" data-bucket="hour">Per hour</button>
+        </nav>
+      </div>
+      <div id="chart"></div>
       <div id="trends"></div>
     </section>
 

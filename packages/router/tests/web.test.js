@@ -141,7 +141,7 @@ test("the server serves the dashboard page and its assets", async () => {
     expect(page.status).toBe(200)
     expect(page.headers.get("content-type")).toContain("text/html")
     const html = await page.text()
-    for (const id of ["verdict", "models", "plans", "compaction", "trends", "decisions"]) {
+    for (const id of ["verdict", "models", "plans", "compaction", "chart", "trends", "decisions"]) {
       expect(html).toContain(`id="${id}"`)
     }
     const script = await fetch(`${server.url}/app.js`)

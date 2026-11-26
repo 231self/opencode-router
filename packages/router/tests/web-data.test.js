@@ -79,15 +79,33 @@ test("decisions: contract, scope filter, and limit", () => {
 
 test("trends: daily buckets price the turn's exact buckets at resolved rates", () => {
   const trends = buildTrends({ turns: TURNS, ratesOf, now: 1_700_100_000_000, days: 30 })
-  expect(trends.daily.length).toBeGreaterThanOrEqual(2)
-  const first = trends.daily[0]
+  expect(trends.bucket).toBe("day")
+  expect(trends.buckets.length).toBeGreaterThanOrEqual(2)
+  const first = trends.buckets[0]
   // Two turns on day one: (700×0.2 + 100×2 + 150×2.5 + 50×10) / 1e6 each.
   expect(first.spendUsd).toBeCloseTo(0.00243, 9)
   expect(first.turns).toBe(2)
   expect(first.cacheReadTokens).toBe(1400)
   const scoped = buildTrends({ turns: TURNS, scope: "session", session: "ses_b", ratesOf, now: 1_700_100_000_000 })
-  const totalTurns = scoped.daily.reduce((sum, day) => sum + day.turns, 0)
+  const totalTurns = scoped.buckets.reduce((sum, day) => sum + day.turns, 0)
   expect(totalTurns).toBe(1)
+})
+
+test("trends: hourly buckets give the bar chart its fine grain", () => {
+  // Two turns in the same hour merge into one bar; a third lands an hour later.
+  const base = 1_700_100_000_000
+  const turns = [
+    turn(base, "ses_a"),
+    turn(base + 60_000, "ses_a"),
+    turn(base + 3_600_000, "ses_a"),
+  ]
+  const trends = buildTrends({ turns, ratesOf, now: base + 7_200_000, bucket: "hour" })
+  expect(trends.bucket).toBe("hour")
+  expect(trends.window).toBe(48)
+  expect(trends.buckets).toHaveLength(2)
+  expect(trends.buckets[0].turns).toBe(2)
+  expect(trends.buckets[0].at).toMatch(/T\d\d:00$/)
+  expect(trends.buckets[1].turns).toBe(1)
 })
 
 test("models: the unit price is scoped, measured or stand-in", () => {

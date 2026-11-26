@@ -64,7 +64,7 @@ async function apiPayload(url, data, session, now) {
     case "/api/plans.json":
       return buildPlans({ ...source, now })
     case "/api/trends.json":
-      return buildTrends({ ...source, scope, session, days, now })
+      return buildTrends({ ...source, scope, session, days, bucket: url.searchParams.get("bucket") ?? undefined, now })
     case "/api/decisions.json":
       return buildDecisions({ ...source, scope, session, limit })
     default:

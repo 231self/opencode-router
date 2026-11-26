@@ -900,7 +900,7 @@ test("/router web starts the dashboard, reports it, and stops it", async () => {
   try {
     await command().run("web")
     expect(text()).toContain("http://127.0.0.1:")
-    expect(text()).toContain("127.0.0.1 only")
+    expect(text()).toContain("Local only")
     // A second start reports the running server rather than double-binding.
     await command().run("web")
     expect(text()).toContain("already running")

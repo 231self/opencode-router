@@ -784,7 +784,10 @@ async function runWeb(context, config, rest) {
   }
   const running = dashboardServer()
   if (running) {
-    await show(context, prose(`Dashboard already running at ${running.url}`))
+    await show(
+      context,
+      prose(`Dashboard already running: [${running.url}](${running.url})`),
+    )
     return
   }
   const { models, providers } = await poolCatalog(context)
@@ -818,7 +821,10 @@ async function runWeb(context, config, rest) {
   })
   await show(
     context,
-    prose(`Dashboard at ${server.url} · 127.0.0.1 only · /router web stop closes it.`),
+    prose(
+      `Dashboard: [${server.url}](${server.url})`,
+      "Local only. Stop with /router web stop.",
+    ),
   )
 }
 
