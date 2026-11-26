@@ -15,12 +15,26 @@ a model that will fail it.
 
 </div>
 
-> **Status: v0.5.0.** Routing, subagent policy, the TUI `/router` surface,
+> **Status: v0.6.0.** Routing, subagent policy, the TUI `/router` surface,
 > per-turn timing, the CLI, and the Kilo shim are implemented and tested. The
 > context optimiser moved to
 > [`@231self/opencode-compaction`](https://www.npmjs.com/package/@231self/opencode-compaction)
 > (install both for pruning). Design of record:
 > [`docs/specs/2026-11-15-opencode-omlx-router-design.md`](https://github.com/231self/opencode-router/blob/main/docs/specs/2026-11-15-opencode-omlx-router-design.md).
+
+## Local dashboard
+
+`/router web` opens a dashboard on `127.0.0.1`: plan burn first, per-model
+unit prices (the cost of 1M tokens of a typical turn on each — measured from
+your own turns where you have them, a labelled stand-in where you don't),
+consumption bars by day or hour, and the recent routing decisions, each
+expandable to its reason. Every table sorts, filters, and searches.
+
+The server binds loopback only and every response is an allow-list
+projection — counts, sizes, prices, and labels, never prompt text or tool
+output. `/router web stop` closes it.
+
+![The local dashboard: plan burn, spend by model with unit prices, and consumption bars](https://raw.githubusercontent.com/231self/opencode-router/main/docs/assets/dashboard.png)
 
 ## Why
 

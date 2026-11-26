@@ -15,6 +15,19 @@ opencode plugin add @231self/opencode-router
 opencode plugin add @231self/opencode-compaction
 ```
 
+## Local dashboard
+
+`/router web` serves a dashboard on `127.0.0.1` — plan burn first, per-model
+unit prices, consumption bars by day or hour, and the routing decisions
+behind them. Every table sorts, filters, and searches; a decision line
+expands to its reason. The command opens your browser; `/router web stop`
+closes it.
+
+Loopback only, and every response is an allow-list projection: counts,
+sizes, prices, and labels — never prompt text, tool output, or credentials.
+
+![The local dashboard: plan burn, spend by model with unit prices, and consumption bars](docs/assets/dashboard.png)
+
 - User docs: [`packages/router/README.md`](packages/router/README.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
 - Benchmarks: [`docs/benchmarks/`](docs/benchmarks) (routing reports regenerated

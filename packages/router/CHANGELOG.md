@@ -1,17 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-11-26
 
 ### Added
 
-- Local web dashboard. `/router web` serves a page on `127.0.0.1` (default
-  port `7410`, `web.port`) showing spend by model with unit prices and mix
-  bases, plan burn, compaction economics, trends, and recent decisions —
-  in two scopes: the session the dashboard was launched from, and every
-  session the host has run. `/router web stop` closes it; it also closes
-  with the plugin. Every response is an allow-list projection (counts,
-  sizes, prices, labels) and the bind address is loopback and not
-  configurable.
+- Local web dashboard. `/router web` opens a page on `127.0.0.1` (default
+  port `7410`, `web.port`) and the browser with it. Plan burn leads, then
+  spend by model with unit prices and mix bases, compaction economics,
+  consumption bars by day or hour (spend, tokens, or turns), and recent
+  decisions — each line expands to its reason. Two scopes: the session the
+  dashboard was launched from, and every session the host has run.
+- Every table sorts (click a header), filters (a funnel in the header opens
+  the column's distinct values), and searches. Numeric columns sort by
+  their numbers, not their formatted text. When spend is genuinely zero —
+  local models — the consumption chart falls back to tokens.
+- `/router web stop` closes the server; it also closes with the plugin. The
+  bind address is loopback and not configurable, and every response is an
+  allow-list projection: counts, sizes, prices, and labels only.
 
 ## 0.5.0 — 2026-11-26
 

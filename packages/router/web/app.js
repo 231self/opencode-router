@@ -11,6 +11,7 @@
   let scope = "all"
   let trendMetric = "spendUsd"
   let trendBucket = "day"
+  let metricChosen = false
   let trendsCache = { day: { buckets: [] }, hour: { buckets: [] } }
 
   // ---- formatting -------------------------------------------------------
@@ -576,6 +577,16 @@
       plansTable.setRows(plans.plans ?? [])
       modelsTable.setRows(models.models ?? [])
       trendsCache = { day, hour }
+      // On free/local plans spend is genuinely zero; a flat spend chart says
+      // nothing. Pick the first metric that carries data — once, at start —
+      // and leave the reader's own choice alone afterwards.
+      if (!metricChosen) {
+        const buckets = day.buckets ?? []
+        const spend = buckets.reduce((sum, b) => sum + b.spendUsd, 0)
+        const tokens = buckets.reduce((sum, b) => sum + b.inputTokens + b.outputTokens + b.cacheReadTokens + b.cacheWriteTokens, 0)
+        if (spend === 0 && tokens > 0) trendMetric = "tokens"
+        metricChosen = true
+      }
       renderChart()
       trendsTable.setRows((trendBucket === "hour" ? hour : day).buckets ?? [])
       decisionsTable.setRows(decisions.items ?? [])
