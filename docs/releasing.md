@@ -95,6 +95,14 @@ npm stage approve <stage-id>                # 2FA prompt; publishes it
 Or open npmjs.com → Staged Packages and approve there (same 2FA challenge).
 Staged publishing requires npm CLI ≥ 11.15; the workflow pins a newer one.
 
+To approve all three in order without babysitting npm's automated review
+(which answers `E409` for the first few minutes after staging), pass the
+ids to the helper — it waits and retries, and stops on any other failure:
+
+```sh
+scripts/approve-staged.sh <shared-id> <compaction-id> <router-id>
+```
+
 Verify after approving:
 
 ```sh
