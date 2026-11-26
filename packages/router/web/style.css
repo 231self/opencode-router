@@ -266,16 +266,45 @@ tr.expandable { cursor: pointer; }
 
 tr.expandable:hover td { background: var(--accent-soft); }
 
+.chevron {
+  display: inline-block;
+  color: var(--muted);
+  margin-right: 0.55rem;
+  transition: transform 0.12s ease;
+}
+
+tr.open .chevron { transform: rotate(90deg); }
+
 tr.detail td {
   white-space: normal;
   border-top: none;
   padding-top: 0;
-  background: var(--accent-soft);
+  padding-bottom: 0.75rem;
 }
 
-.detail .row { padding: 0.3rem 0; }
+.detail-box {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 0.65rem 0.95rem;
+  margin: 0.15rem 0 0.35rem;
+}
 
-.detail .row + .row { border-top: none; }
+.detail-reason {
+  margin: 0 0 0.55rem;
+  font-weight: 600;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1.1rem;
+  font-size: 0.86rem;
+}
+
+.detail-grid .k { color: var(--muted); }
+
+.detail-grid .v { color: var(--text); }
 
 /* ---- consumption chart ------------------------------------------------ */
 

@@ -93,13 +93,15 @@
    * detail panel beneath them. Sorting and filtering survive `setRows`, so
    * the poll does not disturb what the reader arranged.
    */
-  function dataTable({ columns, rows = [], expand = null, placeholder = "Search…" }) {
+  function dataTable({ columns, rows = [], expand = null, rowKey = null, placeholder = "Search…" }) {
     let sortKey = null
     let sortDir = 1
     let query = ""
+    let open = null
     const filters = {}
 
     const text = (col, value) => String(col.text?.(value) ?? value[col.key] ?? "")
+    const keyOf = (value) => String(rowKey ? rowKey(value) : JSON.stringify(value))
     const filterOf = (key) => (filters[key] ??= { needle: "", picked: new Set() })
     const filterActive = (key) => {
       const f = filters[key]
@@ -258,7 +260,8 @@
       return out
     }
 
-    function render() {
+    function render(reopenKey = null) {
+      open = null
       for (const [key, th] of Object.entries(ths)) {
         th.classList.toggle("sort-asc", sortKey === key && sortDir === 1)
         th.classList.toggle("sort-desc", sortKey === key && sortDir === -1)
@@ -278,29 +281,41 @@
       }
       for (const value of list) {
         const tr = el("tr", expand ? "expandable" : null)
-        for (const col of columns) {
+        columns.forEach((col, index) => {
           const td = document.createElement("td")
           if (col.right) td.classList.add("right")
+          if (expand && index === 0) td.append(el("span", "chevron", "▸"))
           const cell = col.render ? col.render(value) : text(col, value)
           if (cell instanceof Node) td.append(cell)
-          else td.textContent = cell
+          else td.append(document.createTextNode(cell))
           tr.append(td)
-        }
+        })
         if (expand) {
-          let detail = null
-          tr.addEventListener("click", () => {
-            if (detail) {
-              detail.remove()
-              detail = null
+          const key = keyOf(value)
+          const toggle = () => {
+            if (open?.key === key) {
+              open.detail.remove()
+              open.tr.classList.remove("open")
+              open = null
               return
             }
-            detail = el("tr", "detail")
+            if (open) {
+              open.detail.remove()
+              open.tr.classList.remove("open")
+            }
+            const detail = el("tr", "detail")
             const td = document.createElement("td")
             td.colSpan = columns.length
             td.append(expand(value))
             detail.append(td)
             tr.after(detail)
-          })
+            tr.classList.add("open")
+            open = { key, tr, detail }
+          }
+          tr.addEventListener("click", toggle)
+          // The poll re-renders this body every few seconds; whatever the
+          // reader had open reopens instead of closing on them.
+          if (reopenKey != null && key === reopenKey) toggle()
         }
         tbody.append(tr)
       }
@@ -310,8 +325,9 @@
     return {
       element: wrap,
       setRows(next) {
+        const reopen = open?.key ?? null
         rows = next
-        render()
+        render(reopen)
       },
     }
   }
@@ -492,15 +508,21 @@
 
   const decisionsTable = dataTable({
     placeholder: "Search decisions…",
+    rowKey: (d) => `${d.ts}|${d.chosen}|${d.source}`,
     expand: (d) => {
-      const box = el("div")
-      box.append(row("reason", d.reason || "—", true))
-      box.append(row("source", [d.source, d.stage].filter(Boolean).join(" · ") || "—"))
-      box.append(row("policy", d.policy || "—"))
-      box.append(row("complexity", d.complexity ? String(d.complexity) : "—"))
-      if (d.applied) box.append(row("applied", d.applied))
-      if (d.error) box.append(row("error", d.error))
-      box.append(row("session", d.session || "—"))
+      const box = el("div", "detail-box")
+      box.append(el("p", "detail-reason", d.reason || "no reason recorded"))
+      const grid = el("div", "detail-grid")
+      const add = (key, value) => {
+        grid.append(el("span", "k", key), el("span", "v", value))
+      }
+      add("source", [d.source, d.stage].filter(Boolean).join(" · ") || "—")
+      add("policy", d.policy || "—")
+      add("complexity", d.complexity ? String(d.complexity) : "—")
+      if (d.applied) add("applied", d.applied)
+      if (d.error) add("error", d.error)
+      add("session", d.session || "—")
+      box.append(grid)
       return box
     },
     columns: [
