@@ -447,3 +447,17 @@ test("a vendor's plan table is readable as plans or as the legacy tiers", () => 
   // The built-in catalog resolves through the same reader.
   expect(resolveBilling({ vendor: "xiaomi-mimo", plan: "max" }).priceUsd).toBe(100)
 })
+
+test("creditsFromTurns keeps record identity when given resolved records", () => {
+  // Burn buckets are matched by `===` at the call sites. Passing raw config
+  // re-resolves into fresh objects and the match silently misses — passing
+  // the resolved records preserves identity. Pinned here so a refactor
+  // cannot quietly break the burn rows again.
+  const records = resolveBillings([{ vendor: "xiaomi-mimo", plan: "max", renewsDay: 1 }])
+  const turns = [
+    { ts: Date.now(), usedModel: "p/mimo-v2.6-pro", tokens: { input: 100, output: 10, cache: { read: 0, write: 0 } } },
+  ]
+  const usage = creditsFromTurns(turns, records, { modelID: "" })
+  expect(usage.byPlan[0].record === records[0]).toBe(true)
+  expect(usage.byPlan[0].credits).toBeGreaterThan(0)
+})

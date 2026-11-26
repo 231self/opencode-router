@@ -276,6 +276,20 @@ Legacy keys are read unchanged: `tier` is the older name for `plan`, and
 vendor does not publish is recorded unpriced — it is never given an invented
 allowance, and its display names the allowance that is consumed.
 
+## `web`
+
+The local dashboard, started on demand by `/router web` and closed by
+`/router web stop`.
+
+| Key | Default | Notes |
+|---|---|---|
+| `port` | `7410` | The dashboard's port. Busy ports fall back to an ephemeral one and the reported URL says where it landed. |
+
+The bind address is `127.0.0.1` and is **not** configurable: the dashboard
+is local by construction, and that line is the wall between it and any
+hosted service. Every response is an allow-list projection — counts, sizes,
+prices, and labels only.
+
 ## `subagents`
 
 | Key | Default | Notes |

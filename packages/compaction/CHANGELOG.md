@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Plan burn rows in `/ctx report` and the sidebar counted 0 credits used:
+  the burn buckets matched plan records by object identity across separate
+  resolutions, which never matches. They now pass the resolved records and
+  show the real burn.
+
 ## 0.3.0 — 2026-11-26
 
 ### Added

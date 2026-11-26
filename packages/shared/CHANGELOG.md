@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `web.port` config default (`7410`) for the router's local dashboard.
+
+### Fixed
+
+- `creditsFromTurns` keeps record identity when given already-resolved
+  records, and the plan-burn call sites now pass them. Matching burn
+  buckets to records by `===` across separate resolutions never matched, so
+  every plan's burn row counted 0 credits used.
+
 ## 0.3.0 — 2026-11-26
 
 ### Added

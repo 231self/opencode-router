@@ -26,6 +26,7 @@
     "src",
     "dist/core.wasm",
     "bin",
+    "web",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

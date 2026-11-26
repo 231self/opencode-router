@@ -13,6 +13,7 @@ import {
 } from "./provision.js"
 import { readHostModelState, resolvePool } from "./pool.js"
 import { loadPricing, refreshPricing } from "./pricing.js"
+import { dashboardServer, startDashboard, stopDashboard } from "./web.js"
 import {
   loadQualityScores,
   qualityCacheAgeMs,
@@ -26,6 +27,7 @@ import {
   clearPins,
   listPins,
   readDecisions,
+  readPin,
   readTurns,
   sessionHash,
   summariseTurns,
@@ -73,6 +75,11 @@ const HELP = [
     detail: "How long the router keeps a model: cache reuse, balanced, or switch every turn; clears pins when changed",
   },
   { command: "pool", line: "/router pool", detail: "Models available to the router and how to edit them" },
+  {
+    command: "web",
+    line: "/router web",
+    detail: "Local dashboard on 127.0.0.1 with unit prices, plan burn, and trends; stop closes it",
+  },
   { command: "pricing", detail: "Input/output/cache prices for the pool, and the price source" },
   { command: "pins", detail: "Per-session model choice, active blocks, and age; list or clear" },
   {
@@ -763,6 +770,58 @@ async function openMenu(context) {
   }
 }
 
+/**
+ * `/router web` — the local dashboard. One server per process: a second
+ * start reports the running URL instead of double-binding, and `stop`
+ * closes it. The supplier re-reads state per request, so every poll shows
+ * what the plugins have written since.
+ */
+async function runWeb(context, config, rest) {
+  if (rest[0] === "stop") {
+    const stopped = await stopDashboard()
+    await show(context, prose(stopped ? "Dashboard stopped." : "No dashboard running."))
+    return
+  }
+  const running = dashboardServer()
+  if (running) {
+    await show(context, prose(`Dashboard already running at ${running.url}`))
+    return
+  }
+  const { models, providers } = await poolCatalog(context)
+  const sessionID = currentSession(context)
+  const session = sessionID ? sessionHash(sessionID) : null
+  const server = await startDashboard({
+    config,
+    session,
+    data: () => {
+      const live = readConfig({ write: false }).config
+      const { pool } = resolvePool({
+        models,
+        providers,
+        config: live,
+        host: HOST,
+        qualityScores: null,
+        prices: loadPricing({ config: live }),
+      })
+      const byRef = new Map(
+        pool.map((entry) => [`${entry.providerID}/${entry.modelID}`, entry.cost]),
+      )
+      return {
+        turns: readTurns(HOST, 1000),
+        decisions: readDecisions(HOST, 200),
+        pin: sessionID ? readPin(HOST, sessionID) : null,
+        billing: live?.billing ?? null,
+        pool,
+        ratesOf: (ref) => byRef.get(String(ref ?? "")) ?? null,
+      }
+    },
+  })
+  await show(
+    context,
+    prose(`Dashboard at ${server.url} · 127.0.0.1 only · /router web stop closes it.`),
+  )
+}
+
 async function runCommand(context, input) {
   const [command = "menu", ...rest] = String(input ?? "").trim().split(/\s+/)
   const config = readConfig({ write: true }).config
@@ -922,6 +981,10 @@ async function runCommand(context, input) {
               : `Added ${planLabel(record) ?? "custom plan"}. Now ${plans.length} plan${plans.length === 1 ? "" : "s"} on file; the pool prices covered models at their rates.`,
         ),
       )
+      return
+    }
+    case "web": {
+      await runWeb(context, config, rest)
       return
     }
     case "pins": {

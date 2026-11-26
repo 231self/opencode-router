@@ -891,3 +891,28 @@ test("/router plan backs out and saves nothing when the wizard is escaped", asyn
   await command().run("plan")
   expect(readConfig({ write: false }).config.billing ?? null).toBeFalsy()
 })
+
+test("/router web starts the dashboard, reports it, and stops it", async () => {
+  environment()
+  const { context, messages, command } = fakeContext()
+  tui.setup(context)
+  const text = () => messages.map((entry) => String(entry.message ?? entry)).join("\n")
+  try {
+    await command().run("web")
+    expect(text()).toContain("http://127.0.0.1:")
+    expect(text()).toContain("127.0.0.1 only")
+    // A second start reports the running server rather than double-binding.
+    await command().run("web")
+    expect(text()).toContain("already running")
+    // The API serves while the command is up.
+    const url = text().match(/http:\/\/127\.0\.0\.1:\d+/)?.[0]
+    expect(url).toBeTruthy()
+    const summary = await (await fetch(`${url}/api/summary.json`)).json()
+    expect(summary.totals.turns).toBe(0)
+  } finally {
+    await command().run("web stop")
+  }
+  expect(text()).toContain("Dashboard stopped.")
+  await command().run("web stop")
+  expect(text()).toContain("No dashboard running.")
+})

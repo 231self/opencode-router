@@ -647,7 +647,10 @@ async function runCommand(context, input) {
   const records = resolveBillings(billing)
   if (records.length > 0) {
     try {
-      const usage = creditsFromTurns(readTurns(HOST, 2000), billing, { modelID: "" })
+      // Passing the resolved records keeps their identity: `creditsFromTurns`
+      // re-resolves raw config into fresh objects, and the burn buckets below
+      // match records by `===`.
+      const usage = creditsFromTurns(readTurns(HOST, 2000), records, { modelID: "" })
       if (usage) {
         planBurns = records.map((record) => {
           const share = usage.byPlan.find((entry) => entry.record === record)?.credits ?? 0

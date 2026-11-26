@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Local web dashboard. `/router web` serves a page on `127.0.0.1` (default
+  port `7410`, `web.port`) showing spend by model with unit prices and mix
+  bases, plan burn, compaction economics, trends, and recent decisions —
+  in two scopes: the session the dashboard was launched from, and every
+  session the host has run. `/router web stop` closes it; it also closes
+  with the plugin. Every response is an allow-list projection (counts,
+  sizes, prices, labels) and the bind address is loopback and not
+  configurable.
+
 ## 0.5.0 — 2026-11-26
 
 ### Added

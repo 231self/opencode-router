@@ -68,6 +68,11 @@ export const DEFAULT_CONFIG = {
     expectedOutputTokens: 1200,
     contextFitRatio: 0.9,
   },
+  web: {
+    // The dashboard's port. The bind address is 127.0.0.1 and is not
+    // configurable: the dashboard is local by construction.
+    port: 7410,
+  },
   quality: {
     overrides: {},
     source: "auto",

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Router dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1 id="verdict">Loading…</h1>
+      <p id="session" class="muted"></p>
+      <nav id="scope" aria-label="Scope">
+        <button type="button" data-scope="session">This session</button>
+        <button type="button" data-scope="all">Everything</button>
+      </nav>
+    </header>
+
+    <section class="card">
+      <h2>Spend by model</h2>
+      <div id="models"></div>
+    </section>
+
+    <section class="card">
+      <h2>Plan burn</h2>
+      <div id="plans"></div>
+    </section>
+
+    <section class="card">
+      <h2>Compaction economics</h2>
+      <div id="compaction"></div>
+    </section>
+
+    <section class="card">
+      <h2>Trends</h2>
+      <div id="trends"></div>
+    </section>
+
+    <section class="card">
+      <h2>Recent decisions</h2>
+      <div id="decisions"></div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

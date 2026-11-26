@@ -5,6 +5,7 @@ import { Router } from "./router.js"
 import { refreshPricingIfStale } from "./pricing.js"
 import { refreshQualityIfStale } from "./quality.js"
 import { TELEMETRY_EVENTS, Telemetry } from "./telemetry.js"
+import { stopDashboard } from "./web.js"
 import { loadCore } from "./wasm.js"
 
 /**
@@ -79,6 +80,14 @@ export default {
       })()
       disposers.push({ dispose: () => controller.abort() })
     }
+
+    // The local dashboard (if `/router web` started one) closes with the
+    // plugin, never outlives it holding a port.
+    disposers.push({
+      dispose: () => {
+        stopDashboard().catch(() => {})
+      },
+    })
 
     if (config.debug) {
       console.log("[omlx-router] loaded", {

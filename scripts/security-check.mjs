@@ -53,7 +53,7 @@ const PACKAGES = [
   },
   {
     dir: "packages/router",
-    allowedRoots: ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "config.example.json", "src", "bin", "dist"],
+    allowedRoots: ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "config.example.json", "src", "bin", "dist", "web"],
   },
 ]
 

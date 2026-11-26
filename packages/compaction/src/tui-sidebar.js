@@ -124,7 +124,9 @@ export function registerCompactionSidebar(context, options = {}) {
       if (records.length > 0) {
         let usage = null
         try {
-          usage = creditsFromTurns(readTurns(HOST, 500), billing, { modelID: "" })
+          // The resolved records keep their identity through `creditsFromTurns`,
+          // which is what the burn buckets match on below.
+          usage = creditsFromTurns(readTurns(HOST, 500), records, { modelID: "" })
         } catch {
           // No turn log: the plan lines show without burn rather than guessing.
         }
