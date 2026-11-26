@@ -1,9 +1,10 @@
 /**
- * The dashboard page. Vanilla JS over the JSON API: tables with sorting,
- * per-column filters and search; consumption bars with hover figures in the
- * DeepSeek-dashboard habit; decisions that expand to their reason. Every
- * value is rendered with `textContent`, so nothing from state can become
- * markup. The scope switcher refetches; the rest is a ~10s poll.
+ * The dashboard page. Vanilla JS over the JSON API: tables with sorting and
+ * header filters (a funnel per column, no permanent chrome), consumption
+ * bars with hover figures in the DeepSeek-dashboard habit, and decisions
+ * that expand to their reason. Every value is rendered with `textContent`,
+ * so nothing from state can become markup. The scope switcher refetches;
+ * the rest is a ~10s poll.
  */
 (() => {
   const POLL_MS = 10000
@@ -69,11 +70,26 @@
     return line
   }
 
+  const SVG_NS = "http://www.w3.org/2000/svg"
+
+  /** A tiny funnel glyph: the column filter, visible on hover. */
+  function funnelIcon() {
+    const svg = document.createElementNS(SVG_NS, "svg")
+    svg.setAttribute("viewBox", "0 0 16 16")
+    svg.setAttribute("class", "funnel")
+    const path = document.createElementNS(SVG_NS, "path")
+    path.setAttribute("d", "M2 3h12l-4.5 5.5V13L6.5 11.5V8.5z")
+    svg.append(path)
+    return svg
+  }
+
   // ---- the table engine -------------------------------------------------
 
   /**
-   * A data table with sortable columns, a search box over all columns, and a
-   * per-column filter input. With `expand`, rows are clickable and open a
+   * A data table with sortable columns and one search box. Column filters
+   * live in the headers: hover reveals a funnel, clicking opens a small
+   * panel with the column's distinct values (toggleable) and a needle. No
+   * permanent filter chrome. With `expand`, rows are clickable and open a
    * detail panel beneath them. Sorting and filtering survive `setRows`, so
    * the poll does not disturb what the reader arranged.
    */
@@ -82,6 +98,13 @@
     let sortDir = 1
     let query = ""
     const filters = {}
+
+    const text = (col, value) => String(col.text?.(value) ?? value[col.key] ?? "")
+    const filterOf = (key) => (filters[key] ??= { needle: "", picked: new Set() })
+    const filterActive = (key) => {
+      const f = filters[key]
+      return Boolean(f && (f.needle || f.picked.size > 0))
+    }
 
     const wrap = el("div", "table-wrap")
     const tools = el("div", "table-tools")
@@ -98,12 +121,11 @@
     const table = document.createElement("table")
     const thead = document.createElement("thead")
     const headRow = el("tr")
-    const filterRow = el("tr", "filter-row")
     const ths = {}
     for (const col of columns) {
       const th = document.createElement("th")
-      th.textContent = col.label
-      if (col.right) th.classList.add("right")
+      th.append(el("span", "th-label", col.label))
+      ths[col.key] = th
       if (col.sortable !== false) {
         th.classList.add("sortable")
         th.addEventListener("click", () => {
@@ -115,26 +137,93 @@
           render()
         })
       }
-      ths[col.key] = th
-      headRow.append(th)
-      const fh = document.createElement("th")
       if (col.filter !== false) {
-        const input = el("input")
-        input.placeholder = "filter"
-        input.addEventListener("input", () => {
-          filters[col.key] = input.value.trim().toLowerCase()
-          render()
+        const button = el("button", "funnel-btn")
+        button.type = "button"
+        button.title = `Filter ${col.label}`
+        button.append(funnelIcon())
+        button.addEventListener("click", (event) => {
+          event.stopPropagation()
+          openFilter(col, th)
         })
-        fh.append(input)
+        th.append(button)
       }
-      filterRow.append(fh)
+      headRow.append(th)
     }
-    thead.append(headRow, filterRow)
+    thead.append(headRow)
     const tbody = document.createElement("tbody")
     table.append(thead, tbody)
     wrap.append(table)
 
-    const text = (col, value) => String(col.text?.(value) ?? value[col.key] ?? "")
+    // ---- header filter panels -------------------------------------------
+
+    let panel = null
+    function closePanel() {
+      if (panel) {
+        panel.remove()
+        panel = null
+      }
+    }
+    document.addEventListener("click", (event) => {
+      if (panel && !panel.contains(event.target)) closePanel()
+    })
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closePanel()
+    })
+
+    function openFilter(col, th) {
+      const wasOpen = panel?.dataset?.key === col.key
+      closePanel()
+      if (wasOpen) return
+      const state = filterOf(col.key)
+      const rect = th.getBoundingClientRect()
+      const box = el("div", "col-popover")
+      box.dataset.key = col.key
+      box.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 250))}px`
+      box.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 220)}px`
+
+      const input = el("input")
+      input.type = "search"
+      input.placeholder = `Filter ${col.label.toLowerCase()}…`
+      input.value = state.needle
+      input.addEventListener("input", () => {
+        state.needle = input.value.trim().toLowerCase()
+        render()
+      })
+      box.append(input)
+
+      const values = [...new Set(rows.map((value) => text(col, value)))].filter(Boolean).sort()
+      for (const value of values.slice(0, 12)) {
+        const chip = el("button", "chip", value)
+        chip.type = "button"
+        chip.setAttribute("aria-pressed", String(state.picked.has(value)))
+        chip.addEventListener("click", () => {
+          if (state.picked.has(value)) state.picked.delete(value)
+          else state.picked.add(value)
+          chip.setAttribute("aria-pressed", String(state.picked.has(value)))
+          render()
+        })
+        box.append(chip)
+      }
+      if (values.length > 12) box.append(el("p", "note", `+${values.length - 12} more — use the search above`))
+
+      const clear = el("button", "chip clear", "Clear")
+      clear.type = "button"
+      clear.addEventListener("click", () => {
+        state.needle = ""
+        state.picked.clear()
+        closePanel()
+        render()
+      })
+      box.append(clear)
+
+      document.body.append(box)
+      panel = box
+      input.focus()
+    }
+
+    // ---- rows ------------------------------------------------------------
+
     const rank = (col, value) => {
       const raw = col.sortValue ? col.sortValue(value) : text(col, value)
       const num = Number(raw)
@@ -145,15 +234,24 @@
       let out = rows.slice()
       if (query) out = out.filter((value) => columns.some((col) => text(col, value).toLowerCase().includes(query)))
       for (const col of columns) {
-        const needle = filters[col.key]
-        if (needle) out = out.filter((value) => text(col, value).toLowerCase().includes(needle))
+        const f = filters[col.key]
+        if (!f) continue
+        out = out.filter((value) => {
+          const cell = text(col, value)
+          if (f.picked.size > 0 && !f.picked.has(cell)) return false
+          if (f.needle && !cell.toLowerCase().includes(f.needle)) return false
+          return true
+        })
       }
       if (sortKey) {
         const col = columns.find((candidate) => candidate.key === sortKey)
         out.sort((a, b) => {
           const left = rank(col, a)
           const right = rank(col, b)
-          const cmp = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right))
+          const cmp =
+            typeof left === "number" && typeof right === "number"
+              ? left - right
+              : String(left).localeCompare(String(right))
           return cmp * sortDir
         })
       }
@@ -164,6 +262,7 @@
       for (const [key, th] of Object.entries(ths)) {
         th.classList.toggle("sort-asc", sortKey === key && sortDir === 1)
         th.classList.toggle("sort-desc", sortKey === key && sortDir === -1)
+        th.classList.toggle("filtering", filterActive(key))
       }
       tbody.replaceChildren()
       const list = visible()
@@ -322,7 +421,12 @@
       { key: "vendor", label: "Vendor", text: (p) => p.vendor },
       { key: "priceUsd", label: "Price", right: true, text: (p) => (p.priceUsd != null ? `$${p.priceUsd}/mo` : "—") },
       { key: "used", label: "Used", right: true, text: (p) => (p.burn ? short(p.burn.used) : "") },
-      { key: "allowance", label: "Allowance", right: true, text: (p) => (p.burn && p.burn.allowance != null ? short(p.burn.allowance) : "") },
+      {
+        key: "allowance",
+        label: "Allowance",
+        right: true,
+        text: (p) => (p.burn && p.burn.allowance != null ? short(p.burn.allowance) : ""),
+      },
       {
         key: "left",
         label: "Left",
@@ -333,7 +437,9 @@
         key: "burn",
         label: "Burn",
         text: (p) =>
-          p.burn && p.burn.allowance != null ? `${Math.round((p.burn.used / p.burn.allowance) * 100)}%` : "no burn published",
+          p.burn && p.burn.allowance != null
+            ? `${Math.round((p.burn.used / p.burn.allowance) * 100)}%`
+            : "no burn published",
         sortValue: (p) => (p.burn && p.burn.allowance ? p.burn.used / p.burn.allowance : -1),
         render: (p) => {
           if (!p.burn || p.burn.allowance == null) return el("span", "muted", p.allowanceNote ?? "no burn published")

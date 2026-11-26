@@ -1,4 +1,5 @@
 import { configPath, formatWeights, readConfig, resolvePolicyWeights, saveConfig, setConfigValue } from "@231self/opencode-shared/config.js"
+import { spawn } from "node:child_process"
 import { facts, join, note, plural, prose, section } from "@231self/opencode-shared/format.js"
 import { planLabel, resolveBillings, withPlan } from "@231self/opencode-shared/plan.js"
 import { dialogAdapter, runPlanWizard } from "@231self/opencode-shared/plan-wizard.js"
@@ -775,6 +776,9 @@ async function openMenu(context) {
  * start reports the running URL instead of double-binding, and `stop`
  * closes it. The supplier re-reads state per request, so every poll shows
  * what the plugins have written since.
+ *
+ * The dialog renders plain text — no links — so the URL is plain and the
+ * browser is opened directly instead of asking the reader to click.
  */
 async function runWeb(context, config, rest) {
   if (rest[0] === "stop") {
@@ -784,10 +788,7 @@ async function runWeb(context, config, rest) {
   }
   const running = dashboardServer()
   if (running) {
-    await show(
-      context,
-      prose(`Dashboard already running: [${running.url}](${running.url})`),
-    )
+    await show(context, prose(`Dashboard already running: ${running.url}`))
     return
   }
   const { models, providers } = await poolCatalog(context)
@@ -819,13 +820,27 @@ async function runWeb(context, config, rest) {
       }
     },
   })
+  openBrowser(server.url)
   await show(
     context,
     prose(
-      `Dashboard: [${server.url}](${server.url})`,
-      "Local only. Stop with /router web stop.",
+      `Dashboard: ${server.url}`,
+      "Opened in your browser. Local only — close with /router web stop.",
     ),
   )
+}
+
+/** Open the dashboard in the default browser. Failure is silent: the URL
+ * is in the message either way. */
+function openBrowser(url) {
+  const opener = process.platform === "darwin" ? "open" : "xdg-open"
+  try {
+    spawn(opener, [url], { stdio: "ignore", detached: true })
+      .on("error", () => {})
+      .unref()
+  } catch {
+    // No browser opener here; the printed URL still works.
+  }
 }
 
 async function runCommand(context, input) {

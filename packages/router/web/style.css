@@ -196,18 +196,70 @@ th.sort-asc::after { content: " ↑"; color: var(--accent); }
 
 th.sort-desc::after { content: " ↓"; color: var(--accent); }
 
-th.right, td.right { text-align: right; }
+td.right { text-align: right; }
 
-.filter-row th {
-  padding-top: 0;
-  border-top: none;
+/* Column filters live in the headers: a funnel appears on hover and opens a
+ * small panel with the column's distinct values. No permanent chrome. */
+.funnel-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0 0 0 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  opacity: 0;
+  transition: opacity 0.12s;
 }
 
-.filter-row input {
-  font-size: 0.78rem;
-  padding: 0.22rem 0.5rem;
-  width: 100%;
-  min-width: 5.5rem;
+.funnel { width: 11px; height: 11px; fill: currentColor; }
+
+th:hover .funnel-btn,
+.funnel-btn:focus-visible,
+th.filtering .funnel-btn { opacity: 1; }
+
+th.filtering .funnel-btn { color: var(--accent); }
+
+.col-popover {
+  position: fixed;
+  z-index: 10;
+  width: 230px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.65rem;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.chip {
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.chip.clear {
+  color: var(--muted);
+  border-style: dashed;
+  text-align: center;
 }
 
 tr.expandable { cursor: pointer; }
