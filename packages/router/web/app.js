@@ -117,7 +117,8 @@
       query = search.value.trim().toLowerCase()
       render()
     })
-    tools.append(search)
+    // Sorting and filtering exist but nothing said so; this line is the map.
+    tools.append(search, el("p", "hint", "Click a header to sort · hover it for the column filter"))
     wrap.append(tools)
 
     const table = document.createElement("table")
@@ -435,19 +436,21 @@
       { key: "name", label: "Plan", text: (p) => p.name },
       { key: "type", label: "Type", text: (p) => p.type },
       { key: "vendor", label: "Vendor", text: (p) => p.vendor },
-      { key: "priceUsd", label: "Price", right: true, text: (p) => (p.priceUsd != null ? `$${p.priceUsd}/mo` : "—") },
-      { key: "used", label: "Used", right: true, text: (p) => (p.burn ? short(p.burn.used) : "") },
+      { key: "priceUsd", label: "Price", right: true, text: (p) => (p.priceUsd != null ? `$${p.priceUsd}/mo` : "—"), sortValue: (p) => p.priceUsd ?? -1 },
+      { key: "used", label: "Used", right: true, text: (p) => (p.burn ? short(p.burn.used) : ""), sortValue: (p) => p.burn?.used ?? -1 },
       {
         key: "allowance",
         label: "Allowance",
         right: true,
         text: (p) => (p.burn && p.burn.allowance != null ? short(p.burn.allowance) : ""),
+        sortValue: (p) => p.burn?.allowance ?? -1,
       },
       {
         key: "left",
         label: "Left",
         right: true,
         text: (p) => (p.burn && p.burn.daysLeft != null ? `${Math.round(p.burn.daysLeft)}d` : ""),
+        sortValue: (p) => p.burn?.daysLeft ?? -1,
       },
       {
         key: "burn",
@@ -485,10 +488,10 @@
         sortValue: (m) => m.unitPrice?.usdPerMTok ?? -1,
       },
       { key: "basis", label: "Basis", text: (m) => m.unitPrice?.basis ?? "" },
-      { key: "input", label: "In", right: true, text: (m) => perM(m.cost?.[0]?.input) },
-      { key: "output", label: "Out", right: true, text: (m) => perM(m.cost?.[0]?.output) },
-      { key: "read", label: "Cache read", right: true, text: (m) => perM(m.cost?.[0]?.cache?.read) },
-      { key: "write", label: "Cache write", right: true, text: (m) => perM(m.cost?.[0]?.cache?.write) },
+      { key: "input", label: "In", right: true, text: (m) => perM(m.cost?.[0]?.input), sortValue: (m) => m.cost?.[0]?.input ?? -1 },
+      { key: "output", label: "Out", right: true, text: (m) => perM(m.cost?.[0]?.output), sortValue: (m) => m.cost?.[0]?.output ?? -1 },
+      { key: "read", label: "Cache read", right: true, text: (m) => perM(m.cost?.[0]?.cache?.read), sortValue: (m) => m.cost?.[0]?.cache?.read ?? -1 },
+      { key: "write", label: "Cache write", right: true, text: (m) => perM(m.cost?.[0]?.cache?.write), sortValue: (m) => m.cost?.[0]?.cache?.write ?? -1 },
       { key: "source", label: "Source", text: (m) => m.costSource ?? "" },
     ],
   })
@@ -497,11 +500,11 @@
     placeholder: "Search periods…",
     columns: [
       { key: "at", label: "Period", text: (b) => at(b.at) },
-      { key: "turns", label: "Turns", right: true, text: (b) => String(b.turns) },
-      { key: "inputTokens", label: "Input", right: true, text: (b) => short(b.inputTokens) },
-      { key: "outputTokens", label: "Output", right: true, text: (b) => short(b.outputTokens) },
-      { key: "cacheReadTokens", label: "Cache read", right: true, text: (b) => short(b.cacheReadTokens) },
-      { key: "cacheWriteTokens", label: "Cache write", right: true, text: (b) => short(b.cacheWriteTokens) },
+      { key: "turns", label: "Turns", right: true, text: (b) => String(b.turns), sortValue: (b) => b.turns },
+      { key: "inputTokens", label: "Input", right: true, text: (b) => short(b.inputTokens), sortValue: (b) => b.inputTokens },
+      { key: "outputTokens", label: "Output", right: true, text: (b) => short(b.outputTokens), sortValue: (b) => b.outputTokens },
+      { key: "cacheReadTokens", label: "Cache read", right: true, text: (b) => short(b.cacheReadTokens), sortValue: (b) => b.cacheReadTokens },
+      { key: "cacheWriteTokens", label: "Cache write", right: true, text: (b) => short(b.cacheWriteTokens), sortValue: (b) => b.cacheWriteTokens },
       { key: "spendUsd", label: "Spend", right: true, text: (b) => dollars(b.spendUsd), sortValue: (b) => b.spendUsd },
     ],
   })
@@ -530,6 +533,16 @@
       { key: "chosen", label: "Model", text: (d) => d.chosen || "?" },
       { key: "turnClass", label: "Class", text: (d) => d.turnClass || "—" },
       { key: "reason", label: "Reason", text: (d) => d.reason || "" },
+      { key: "source", label: "Source", text: (d) => d.source || "—" },
+      { key: "policy", label: "Policy", text: (d) => d.policy || "—" },
+      {
+        key: "complexity",
+        label: "Complexity",
+        right: true,
+        text: (d) => (d.complexity ? String(d.complexity) : "—"),
+        sortValue: (d) => d.complexity || -1,
+      },
+      { key: "applied", label: "Applied", text: (d) => d.applied || "—" },
     ],
   })
 

@@ -192,14 +192,17 @@ th.sortable { cursor: pointer; user-select: none; }
 
 th.sortable:hover { color: var(--text); }
 
-th.sort-asc::after { content: " ↑"; color: var(--accent); }
+th.sortable::after { content: " ↕"; opacity: 0.4; }
 
-th.sort-desc::after { content: " ↓"; color: var(--accent); }
+th.sort-asc::after { content: " ↑"; color: var(--accent); opacity: 1; }
+
+th.sort-desc::after { content: " ↓"; color: var(--accent); opacity: 1; }
 
 td.right { text-align: right; }
 
-/* Column filters live in the headers: a funnel appears on hover and opens a
- * small panel with the column's distinct values. No permanent chrome. */
+/* Column filters live in the headers: a funnel opens a small panel with the
+ * column's distinct values. The funnel stays faintly visible so the feature
+ * is findable; hover brings it forward. */
 .funnel-btn {
   border: none;
   background: none;
@@ -209,7 +212,7 @@ td.right { text-align: right; }
   display: inline-flex;
   align-items: center;
   vertical-align: middle;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity 0.12s;
 }
 
@@ -220,6 +223,12 @@ th:hover .funnel-btn,
 th.filtering .funnel-btn { opacity: 1; }
 
 th.filtering .funnel-btn { color: var(--accent); }
+
+.hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 0.4rem 0 0;
+}
 
 .col-popover {
   position: fixed;
