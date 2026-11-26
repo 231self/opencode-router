@@ -149,7 +149,9 @@
           event.stopPropagation()
           openFilter(col, th)
         })
-        th.append(button)
+        // Filter goes left of the label; the sort arrow trails it on the
+        // right (the `::after` on the header).
+        th.prepend(button)
       }
       headRow.append(th)
     }
