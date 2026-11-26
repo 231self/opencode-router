@@ -811,3 +811,32 @@ test("no plan means no plan-credit section, not a zero one", () => {
   const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
   expect(report).not.toContain("plan credits")
 })
+
+test("the report shows the unit price and prices context growth at it", () => {
+  const pin = {
+    compaction: {
+      verdict: "compact-now",
+      turns: 5,
+      changedTurns: 2,
+      advisory: {
+        verdict: "compact-now",
+        source: "deterministic",
+        confidence: 0.72,
+        breakEvenTurns: 2,
+        perTurnSavings: 0.0123,
+        worthIt: true,
+        cache: { ratio: 0.82, samples: 6, source: "measured" },
+        // The same number the router weighs, with its mix basis attached.
+        unitPrice: { usdPerMTok: 0.4575, basis: "measured mix · 213 turns", measured: true, projection: false },
+        signals: { contextTokens: 120_000, growth: 4_000 },
+        projections: [{ turns: 8, net: 0.0524, worthIt: true }],
+      },
+    },
+  }
+  const report = advisoryReport(pin, { noise: { instability: 0 }, expectedTurns: 8 })
+  for (const line of report.split("\n")) expect(line.length).toBeLessThanOrEqual(72)
+  expect(report).toContain("unit price")
+  expect(report).toContain("measured mix · 213 turns")
+  // The growth of the context is priced at the unit price: the holding cost.
+  expect(report).toContain("per turn at unit price")
+})

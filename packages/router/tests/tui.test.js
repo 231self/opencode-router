@@ -473,6 +473,25 @@ test("/router pool saves an explicit model list", async () => {
   expect(config.pool.models).toEqual(["deepseek/deepseek-flash"])
 })
 
+test("/router pool shows each model's unit price and its mix basis", async () => {
+  environment()
+  fs.writeFileSync(
+    process.env.OMLX_ROUTER_CONFIG,
+    JSON.stringify({ pool: { source: "list", models: ["deepseek/deepseek-flash"] } }),
+  )
+  const { context, messages, command, setSelect } = fakeContext()
+  tui.setup(context)
+  setSelect(undefined)
+  await command().run("pool")
+  const text = messages.map((entry) => String(entry.message ?? entry)).join("\n")
+  expect(text).toContain("unit ")
+  expect(text).toContain("/M")
+  // A fresh state dir has no turns: the published mix applies and is
+  // labelled as the stand-in it is.
+  expect(text).toContain("reference mix")
+  expect(text).toContain("stand-in")
+})
+
 test("/router explain shows the decision, scores, costs, and verdict", async () => {
   environment()
   appendDecision(
@@ -834,8 +853,8 @@ test("/router plan records a plan and prices the pool at its rates", async () =>
   const { context, messages, command, setSelect, setConfirm } = fakeContext()
   tui.setup(context)
 
-  // Wizard answers: pick Xiaomi MiMo from the catalog, then the Max tier.
-  setSelect("xiaomi-mimo", "max")
+  // Wizard answers: type, then Xiaomi MiMo from the catalog, then Max.
+  setSelect("subscription", "xiaomi-mimo", "max")
   setConfirm(true)
   await command().run("plan")
 
@@ -852,10 +871,10 @@ test("/router plan adds a second plan beside the first", async () => {
   const { context, command, setSelect, setConfirm } = fakeContext()
   tui.setup(context)
 
-  setSelect("xiaomi-mimo", "max")
+  setSelect("subscription", "xiaomi-mimo", "max")
   setConfirm(true)
   await command().run("plan")
-  setSelect("github-copilot", "pro")
+  setSelect("subscription", "github-copilot", "pro")
   setConfirm(true)
   await command().run("plan")
 

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.0 — 2026-11-26
+
+### Added
+
+- `unit-price.js`: the unit price of a model — what 1M tokens of a typical
+  turn cost the user on it. The resolved rate card (plan rates first, then
+  the public price list) blended with the token mix of the user's own turn
+  log (`measureMix`: uncached input, cache reads, cache writes, output).
+  A model with no turns falls back to a published reference blend — 7 : 2 : 1
+  cache hits : input : output (Artificial Analysis, via aicost.tools'
+  blended-rate glossary, checked 2026-11-26) — labelled `reference mix ·
+  stand-in`, which informs but never vetoes.
+- Billing schema `type` → `vendor` → `plan`: records carry `type`
+  (subscription or payg), `vendor`, and one of the vendor's `plans`. `tier`
+  remains as the legacy name for `plan` and resolves identically; a user's
+  `plans.json` may key the table `plans` or `tiers`. Payg is a type with no
+  vendor and no plan, and `payg: true` still reads as its marker.
+
+### Fixed
+
+- A ChatGPT plan no longer displays as if nothing is consumed. Plus carries
+  a weekly allowance beside its 5-hour window (whichever runs out first
+  stops you); Pro consumes a weekly Work/Codex allowance with no five-hour
+  limit; Go a monthly one. Where the vendor publishes no size — "does not
+  correspond to a fixed number of messages or tasks" — the plan stays
+  unpriced and names the allowance that is consumed instead of implying
+  there is none. Cursor and Claude say the same in their own terms.
+
 ## 0.2.0 — 2026-11-24
 
 ### Added

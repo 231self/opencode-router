@@ -24,10 +24,10 @@ test("human amounts parse with suffixes and separators", () => {
 })
 
 test("the MiMo path records a catalog-backed record", async () => {
-  const ask = scripted(["xiaomi-mimo", "max", true])
+  const ask = scripted(["subscription", "xiaomi-mimo", "max", true])
   const record = await runPlanWizard({ ask, modelLabel: "xiaomi-token-plan-sgp/mimo-v2.6-pro" })
   expect(record.vendor).toBe("xiaomi-mimo")
-  expect(record.tier).toBe("max")
+  expect(record.plan).toBe("max")
   expect(record.renewsDay).toBe(1)
   // The confirmation lists the source before saving.
   const confirm = ask.asked.find((q) => q.kind === "confirm")
@@ -36,17 +36,18 @@ test("the MiMo path records a catalog-backed record", async () => {
 })
 
 test("declining the confirmation saves nothing", async () => {
-  const ask = scripted(["xiaomi-mimo", "max", false])
+  const ask = scripted(["subscription", "xiaomi-mimo", "max", false])
   expect(await runPlanWizard({ ask })).toBeNull()
 })
 
 test("escaping anywhere saves nothing", async () => {
   expect(await runPlanWizard({ ask: scripted([undefined]) })).toBeNull()
-  expect(await runPlanWizard({ ask: scripted(["xiaomi-mimo", undefined]) })).toBeNull()
+  expect(await runPlanWizard({ ask: scripted(["subscription", "xiaomi-mimo", undefined]) })).toBeNull()
 })
 
-test("pay per token and skip are records, so they never nag again", async () => {
+test("pay as you go and skip are records, so they never nag again", async () => {
   expect(await runPlanWizard({ ask: scripted(["payg"]) })).toEqual({
+    type: "payg",
     payg: true,
     source: { url: null, checked: null, status: "user" },
   })
@@ -57,7 +58,7 @@ test("pay per token and skip are records, so they never nag again", async () => 
 })
 
 test("the custom path records only stated facts", async () => {
-  const ask = scripted(["other", "Acme Plan", "16", "82B", "credits", "5", true])
+  const ask = scripted(["subscription", "other", "Acme Plan", "16", "82B", "credits", "5", true])
   const record = await runPlanWizard({ ask })
   expect(record.name).toBe("Acme Plan")
   expect(record.priceUsd).toBe(16)
@@ -66,7 +67,7 @@ test("the custom path records only stated facts", async () => {
 })
 
 test("the custom path rejects junk numbers instead of saving them", async () => {
-  const ask = scripted(["other", "Acme", "cheap", "82B", "credits", "5", undefined])
+  const ask = scripted(["subscription", "other", "Acme", "cheap", "82B", "credits", "5", undefined])
   expect(await runPlanWizard({ ask })).toBeNull()
   const confirm = ask.asked.find((q) => q.kind === "confirm")
   expect(confirm.message).toContain("positive number")
@@ -86,11 +87,11 @@ test("a priced model or an existing record suppresses the prompt", () => {
 })
 
 test("a ChatGPT tier with a published window is priced from it, not left unpriced", async () => {
-  const ask = scripted(["openai-codex", "plus", true])
+  const ask = scripted(["subscription", "openai-codex", "plus", true])
   const record = await runPlanWizard({ ask })
   expect(record.vendor).toBe("openai-codex")
-  expect(record.tier).toBe("plus")
-  // The wizard records the vendor/tier; the window comes from the catalog at
+  expect(record.plan).toBe("plus")
+  // The wizard records the vendor/plan; the window comes from the catalog at
   // resolution. No credit quota exists, but the window does — so this is a
   // window plan, priced per model once the message size is measured.
   const resolved = resolveBilling(record)
@@ -103,16 +104,16 @@ test("a ChatGPT tier with a published window is priced from it, not left unprice
 })
 
 test("a ChatGPT tier with no published window is unpriced and says so", async () => {
-  const ask = scripted(["openai-codex", "business", true])
+  const ask = scripted(["subscription", "openai-codex", "business", true])
   const record = await runPlanWizard({ ask })
-  expect(record.tier).toBe("business")
+  expect(record.plan).toBe("business")
   const confirm = ask.asked.find((q) => q.kind === "confirm")
   expect(confirm.message).toContain("not published")
   expect(confirm.message).toContain("not computable")
 })
 
 test("an empty allowance is a recorded usage-window plan, not an error", async () => {
-  const ask = scripted(["other", "Acme Windows", "20", "", true])
+  const ask = scripted(["subscription", "other", "Acme Windows", "20", "", true])
   const record = await runPlanWizard({ ask })
   expect(record.name).toBe("Acme Windows")
   expect(record.priceUsd).toBe(20)

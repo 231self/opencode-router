@@ -79,6 +79,7 @@ export function composeAdvisory({
   pricing = null,
   priceSource = null,
   moneyBasis = "",
+  unitPrice = null,
   capacity = null,
   cache = null,
   projections = [],
@@ -152,6 +153,11 @@ export function composeAdvisory({
     // Non-empty when the money is a projection at a sibling's list price
     // rather than the user's own bill.
     moneyBasis: moneyBasis ?? "",
+    // What 1M tokens of a typical turn cost on this model for this user —
+    // the same number the router weighs. Its `basis` says whether the turn
+    // mix is measured or the published stand-in, and a stand-in may inform
+    // but never vetoes.
+    unitPrice: unitPrice ?? null,
     capacity: capacity ?? null,
     cache: cache ?? { ratio: 0, samples: 0, source: "none" },
     projections,

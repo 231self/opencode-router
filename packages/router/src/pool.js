@@ -3,6 +3,8 @@ import os from "node:os"
 import path from "node:path"
 
 import { resolveCost } from "@231self/opencode-shared/cost-resolution.js"
+import { readTurns } from "@231self/opencode-shared/state.js"
+import { unitPrice } from "@231self/opencode-shared/unit-price.js"
 import { priceForModel } from "./pricing.js"
 import { qualityForModel } from "./quality.js"
 
@@ -71,6 +73,9 @@ export function resolvePool({
 } = {}) {
   const warnings = []
   const state = readHostModelState(host, env)
+  // The turn log prices what a token costs: the unit price blends each
+  // model's rate card with the measured mix of the user's own turns.
+  const turns = readTurns(host, 1000, env)
   const baseURLs = providerBaseURLs(providers)
   const byKey = new Map()
   for (const model of models) {
@@ -172,6 +177,12 @@ export function resolvePool({
       local,
     })
     const cost = resolved.tiers
+    // The unit price: what 1M tokens of a typical turn cost on this model for
+    // this user. The resolved rate card blended with the measured token mix
+    // of the user's own turns; a model with no turns falls back to the
+    // published reference mix and is labelled a stand-in. The router's cost
+    // term and the display weigh this one number.
+    const unit = unitPrice({ resolved, turns, modelID: id, local })
     return {
       providerID: model.providerID,
       modelID: id,
@@ -180,6 +191,7 @@ export function resolvePool({
       local,
       cost,
       costSource: resolved.source,
+      unitPrice: unit,
       limit: {
         context: Number(model.limit?.context) || 0,
         ...(Number(model.limit?.input) > 0 ? { input: Number(model.limit.input) } : {}),

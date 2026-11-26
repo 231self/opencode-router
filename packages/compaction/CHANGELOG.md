@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 — 2026-11-26
+
+### Added
+
+- Unit price in the advisory. The advisory carries the same per-model unit
+  price the router weighs (one shared precedence and one shared turn mix),
+  `/ctx report` shows it (`unit price · $0.46 per Mtok · measured mix · 213
+  turns`), and context growth is priced at it — `+4,000 tokens · ≈ $0.002
+  per turn at unit price`, the holding cost in the compact-or-wait trade.
+  The sidebar shows `unit $0.46/M · measured mix` (or `stand-in mix`).
+- Plan setup asks in the schema's order — payg or subscription, then vendor,
+  then the vendor's plan — and records `type`, `vendor`, `plan`.
+
+### Changed
+
+- The plan feed refresh says `size not published by the vendor` rather than
+  `not published by the vendor`: the ChatGPT weekly allowance exists and is
+  consumed; only its size is unpublished.
+
 ## 0.2.0 — 2026-11-24
 
 ### Added

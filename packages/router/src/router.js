@@ -10,11 +10,14 @@ import {
   readDecisions,
   readPin,
   readStats,
+  readTurns,
   sessionHash,
   writePin,
   writeStats,
 } from "@231self/opencode-shared/state.js"
 import { cacheHitShare, countContextTokens, estimateTokens, measureSessionContext } from "@231self/opencode-shared/tokens.js"
+import { measureMix } from "@231self/opencode-shared/unit-price.js"
+import { measureTokensPerTurn } from "@231self/opencode-shared/plan.js"
 
 import { decisionRef, refOf, sameModel, sameModelAndVariant } from "@231self/opencode-shared/refs.js"
 
@@ -151,16 +154,23 @@ function pinForRequest(pin) {
  *
  * When the pinned model served the session's last turn, its measured share
  * applies; a pin that has not earned a cache (another model served the last
- * turn) is priced cold. With nothing measurable, or when the configured
- * assumption is 0 (discount off), the configured value applies unchanged.
+ * turn) is priced cold. With no turn to measure, the measured share of the
+ * user's own log prices the horizon before the configured assumption does —
+ * measured, not assumed. The configured value applies when nothing is
+ * measurable, and when it is 0 (discount off) it applies unchanged.
  */
-function cacheHitRatioFor({ host, env, hash, pin, fallback }) {
-  if (!pin?.model || !(fallback > 0)) return fallback
-  const last = latestTurnFor(host, hash, env)
-  if (!last) return fallback
-  const pinned = `${pin.model.providerID}/${pin.model.id ?? pin.model.modelID}`
-  if (last.usedModel !== pinned) return 0
-  return Math.min(0.95, cacheHitShare(last.tokens))
+function cacheHitRatioFor({ host, env, hash, pin, fallback, turns = null }) {
+  if (!(fallback > 0)) return fallback
+  if (pin?.model) {
+    const last = latestTurnFor(host, hash, env)
+    if (last) {
+      const pinned = `${pin.model.providerID}/${pin.model.id ?? pin.model.modelID}`
+      if (last.usedModel !== pinned) return 0
+      return Math.min(0.95, cacheHitShare(last.tokens))
+    }
+  }
+  const measured = measureMix(turns ?? readTurns(host, 1000, env))
+  return measured ? Math.min(0.95, measured.mix.read) : fallback
 }
 
 /** A calibration only speaks for the judge it was measured against. */
@@ -335,13 +345,22 @@ export class Router {
       const stats = readStats(this.host, this.env) ?? { decisions: 0, switches: 0 }
 
       const hash = sessionHash(sessionID)
+      // The turn log is the one source for the projection's assumptions: the
+      // cache-read share and the output size are measured from it where
+      // turns exist, and fall back to the configured estimates otherwise.
+      const turns = readTurns(this.host, 1000, this.env)
       const cacheHitRatio = cacheHitRatioFor({
         host: this.host,
         env: this.env,
         hash,
         pin,
+        turns,
         fallback: Number.isFinite(Number(config.pin?.cacheHitRatio)) ? Number(config.pin.cacheHitRatio) : 0.8,
       })
+      const measuredMix = measureMix(turns)
+      const perTurn = measureTokensPerTurn(turns)
+      const measuredOutput =
+        measuredMix && perTurn ? Math.round(measuredMix.mix.output * perTurn.tokensPerTurn) : 0
       // A score gap inside the judge's calibrated spread is verdict noise, not
       // a reason to switch: floor the hysteresis at the measured band.
       const noise = readJudgeNoise(this.env)
@@ -373,6 +392,10 @@ export class Router {
         pool: eligible,
         settings: {
           ...config,
+          limits: {
+            ...(config.limits ?? {}),
+            ...(measuredOutput > 0 ? { expectedOutputTokens: measuredOutput } : {}),
+          },
           pin: { ...config.pin, cacheHitRatio, switchThreshold },
         },
         pin: completed && !pin?.forced ? null : pinForRequest(pin),

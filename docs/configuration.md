@@ -246,6 +246,36 @@ first-party billing still wins when the host does report it. Prices are cached a
 refresh` refetches. `opencode-model-router pricing provider/model` looks up one
 model. Set `"source": "off"` to use only what the host reports.
 
+## `billing`
+
+What you pay for, so plan rates can replace list prices. The schema is
+**type → vendor → plan**:
+
+| Level | Values | Decides |
+|---|---|---|
+| `type` | `subscription`, `payg` | Which economics apply: plan rates, or list prices |
+| `vendor` | catalog key or `custom` | Which mechanism and published parameters: credits, dollar budget, token quota, usage window |
+| `plan` | one of the vendor's plans | The exact numbers: price, allowance, per-model rates |
+
+A subscription record names one vendor and one of its plans:
+
+```json
+{ "billing": { "type": "subscription", "vendor": "xiaomi-mimo", "plan": "max", "renewsDay": 1 } }
+```
+
+`payg` is the type with no vendor and no plan — list prices stand and nothing
+is priced at plan rates. Several plans may be held at once (a JSON array); each
+covers the models it names in `models`, and a plan it does not name keeps list
+prices. `/ctx plan` and `/router plan` write this record from the wizard; the
+full catalog lives in `packages/shared/src/plan.js` and extends through
+`~/.config/omlx-router/plans.json` (a vendor has `plans`; `tiers` is the
+earlier name for the same table and still reads).
+
+Legacy keys are read unchanged: `tier` is the older name for `plan`, and
+`payg: true` the older marker for `"type": "payg"`. A plan whose allowance the
+vendor does not publish is recorded unpriced — it is never given an invented
+allowance, and its display names the allowance that is consumed.
+
 ## `subagents`
 
 | Key | Default | Notes |

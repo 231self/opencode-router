@@ -313,3 +313,49 @@ test("the pricing table fills host gaps without overriding real prices", () => {
   expect(byId.mystery.cost).toEqual([])
   expect(byId.mystery.costSource).toBe("unknown")
 })
+
+/** A state dir holding one turn log, so unit prices can be measured. */
+function envWithTurns(turns) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omlx-router-turns-"))
+  fs.mkdirSync(path.join(dir, "opencode"), { recursive: true })
+  fs.writeFileSync(path.join(dir, "opencode", "turns.jsonl"), turns.map((t) => JSON.stringify(t)).join("\n"))
+  return { OMLX_ROUTER_STATE: dir }
+}
+
+test("a pool entry carries its unit price, measured from the turn log", () => {
+  const turns = [
+    { usedModel: "deepseek/deepseek-flash", tokens: { input: 100, output: 50, cache: { read: 700, write: 150 } } },
+    { usedModel: "deepseek/deepseek-flash", tokens: { input: 100, output: 50, cache: { read: 700, write: 150 } } },
+  ]
+  const env = { ...envWithFavorites([{ providerID: "deepseek", modelID: "deepseek-flash" }]), ...envWithTurns(turns) }
+  const { pool } = resolvePool({ models: catalog(), providers: [], config: config(), env })
+  const [entry] = pool
+  expect(entry.unitPrice.measured).toBe(true)
+  expect(entry.unitPrice.basis).toContain("2 turns")
+  // The measured mix weighs the cache-read share at its own rate:
+  // (700×0.05 + 100×0.2 + 150×0.2 + 50×0.8) / 1000 = 0.125 $/Mtok
+  expect(entry.unitPrice.usdPerMTok).toBeCloseTo(0.125, 6)
+})
+
+test("an unused model prices at the stand-in mix and says so", () => {
+  const env = { ...envWithFavorites([{ providerID: "deepseek", modelID: "deepseek-flash" }]), ...envWithTurns([]) }
+  const { pool } = resolvePool({ models: catalog(), providers: [], config: config(), env })
+  const [entry] = pool
+  expect(entry.unitPrice.measured).toBe(false)
+  expect(entry.unitPrice.basis).toContain("reference mix")
+  expect(entry.unitPrice.basis).toContain("stand-in")
+  expect(entry.unitPrice.projection).toBe(true)
+})
+
+test("a local model's unit price is zero", () => {
+  const env = {
+    ...envWithFavorites([
+      { providerID: "deepseek", modelID: "deepseek-flash" },
+      { providerID: "omlx", modelID: "local-4b" },
+    ]),
+    ...envWithTurns([]),
+  }
+  const { pool } = resolvePool({ models: catalog(), providers: [], config: config(), env })
+  const local = pool.find((entry) => entry.local)
+  expect(local.unitPrice.usdPerMTok).toBe(0)
+})

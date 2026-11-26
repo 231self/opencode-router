@@ -83,3 +83,17 @@ test("no advisory yet means no invented verdict", () => {
   expect(block.items[0]).toBe("ctx 30K/262K · 89% free")
   expect(block.items.some((item) => item.startsWith("verdict"))).toBe(false)
 })
+
+test("the block shows the unit price with its mix basis", () => {
+  const measured = compactionSidebarBlock({
+    unitPrice: { usdPerMTok: 0.4575, measured: true, basis: "measured mix · 213 turns" },
+  })
+  expect(measured.items.join("\n")).toContain("unit $0.46/M · measured mix")
+  const stand = compactionSidebarBlock({
+    unitPrice: { usdPerMTok: 0.0012, measured: false, basis: "reference mix · stand-in" },
+  })
+  expect(stand.items.join("\n")).toContain("unit $0.0012/M · stand-in mix")
+  // No unit price, or a free one: the line is left out, not printed as zero.
+  const none = compactionSidebarBlock({ unitPrice: { usdPerMTok: 0, measured: true } })
+  expect(none.items.join("\n")).not.toContain("unit ")
+})

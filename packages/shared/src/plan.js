@@ -56,45 +56,82 @@ export const PLAN_CATALOG = {
     name: "ChatGPT plans (via Codex)",
     // Tier names already carry the product name ("ChatGPT Plus"), so the
     // record label uses the tier alone rather than stacking two names.
-    nameFrom: "tier",
-    // Usage windows: the vendor publishes a price and relative limits
-    // ("5x more usage per 5-hour session"), never a token allowance. No
-    // shadow price can be computed from published facts, so `s` stays
-    // unknown and the display says so. A user-stated allowance is the only
-    // route to a number, and that is labelled as the user's estimate.
+    nameFrom: "plan",
+    // Usage allowances, consumed on use. Plus and Standard Business carry a
+    // 5-hour window *and* a weekly allowance; Pro (100/200/500) has no
+    // five-hour limit but a weekly one; Go has a monthly one. The vendor
+    // publishes message estimates only for the 5-hour window ("GPT-6.1 Sol
+    // 15-160" per 5h) and no size at all for the weekly or monthly
+    // allowance ("does not correspond to a fixed number of messages or
+    // tasks"). Where no size is published no shadow price is computed, and
+    // the display names the allowance that is consumed rather than implying
+    // there is none. A user-stated allowance is the only route to a number,
+    // and that is labelled as the user's estimate.
     capType: "usage-window",
     allowancePublished: false,
     // Tracker feed: prices and the vendor's exact limit wording, with a
-    // check date. See plan-feed.js. The feed confirms
-    // `weeklyCapPublished: false` for this vendor; it cannot supply `N`.
+    // check date. See plan-feed.js. The feed publishes no *size* for the
+    // weekly allowance (`weeklyCapPublished: false`), so it cannot
+    // supply `N`.
     feed: { provider: "limitdex", tool: "codex" },
     source: {
       url: "https://developers.openai.com/codex/pricing/",
-      checked: "2026-11-24",
+      checked: "2026-11-25",
       status: "official",
     },
-    noWeightsNote: "usage windows, not token counts — no published allowance to price",
+    noWeightsNote: "a usage allowance is consumed · its size is not published by the vendor",
     overage: "pause",
     tiers: {
-      go: { name: "ChatGPT Go", priceUsd: 8, feedPlan: "Go" },
+      go: {
+        name: "ChatGPT Go",
+        priceUsd: 8,
+        feedPlan: "Go",
+        allowanceNote:
+          "a monthly usage allowance is consumed · size not published by the vendor · resets monthly",
+      },
       // The vendor publishes the window as a message budget per 5h for one
       // reference model: "Est. local messages per 5h: GPT-6.1 Sol 15-160".
       // That is the published part; the size of a message is measured from
       // the user's own turns. Together they give the window a dollar value,
-      // and each model is priced at its own list share of it.
+      // and each model is priced at its own list share of it. A weekly
+      // allowance binds beside the window — whichever runs out first stops
+      // the user — and the vendor publishes no size for that one.
       plus: {
         name: "ChatGPT Plus",
         priceUsd: 20,
         feedPlan: "Plus",
         window: { messagesPerWindow: 160, windowHours: 5, refModel: "gpt-6.1-sol" },
+        allowanceNote:
+          "a weekly allowance also binds (size not published) — whichever limit runs out first stops you · resets weekly (rolling)",
       },
-      pro: { name: "ChatGPT Pro", priceUsd: 100, feedPlan: "Pro" },
-      business: { name: "ChatGPT Business", priceUsd: 25, feedPlan: "Business" },
+      // Pro consumes a weekly Work/Codex allowance and has no five-hour
+      // limit ("Pro plans currently have no five-hour limit"). OpenAI
+      // publishes no size for the weekly allowance — "does not correspond
+      // to a fixed number of messages or tasks" — so there is nothing to
+      // convert into a token count and no shadow price is derived. The tier
+      // is recorded unpriced and named as the consumed weekly allowance,
+      // not as an absence. From December 2026 the allowance becomes
+      // token-measured and shared across ChatGPT and Codex; the sizes are
+      // not published yet.
+      pro: {
+        name: "ChatGPT Pro",
+        priceUsd: 100,
+        feedPlan: "Pro",
+        allowanceNote:
+          "a weekly Work/Codex allowance is consumed · no five-hour limit (vendor, checked 2026-11-25) · size not published: 'not a fixed number of messages or tasks' · resets weekly (rolling · see Settings → Usage)",
+      },
+      business: {
+        name: "ChatGPT Business",
+        priceUsd: 25,
+        feedPlan: "Business",
+        allowanceNote:
+          "a 5-hour window and a weekly allowance are consumed · message counts not published for this tier at this check · resets weekly (rolling)",
+      },
     },
   },
   "github-copilot": {
     name: "GitHub Copilot",
-    nameFrom: "tier",
+    nameFrom: "plan",
     // Dollar budget: the plan hands back a fixed dollar value of API usage
     // ("Total monthly AI credits: $15 per month", 1 credit = $0.01). No token
     // count is published, but one is implied by any model's own list price —
@@ -122,7 +159,7 @@ export const PLAN_CATALOG = {
   },
   "bolt": {
     name: "Bolt",
-    nameFrom: "tier",
+    nameFrom: "plan",
     // A real published token quota: "10M tokens/month, rollover included".
     // This is the best kind of allowance — the vendor states N outright, so
     // the shadow price is exact (price ÷ tokens) with no derivation and no
@@ -143,7 +180,7 @@ export const PLAN_CATALOG = {
   },
   "replit": {
     name: "Replit",
-    nameFrom: "tier",
+    nameFrom: "plan",
     capType: "dollar-budget",
     allowancePublished: true,
     source: {
@@ -160,7 +197,7 @@ export const PLAN_CATALOG = {
   },
   "cursor": {
     name: "Cursor",
-    nameFrom: "tier",
+    nameFrom: "plan",
     // Usage windows in relative terms ("4x more usage compared to Plus"):
     // no token allowance is published, so no shadow price exists.
     capType: "usage-window",
@@ -170,7 +207,7 @@ export const PLAN_CATALOG = {
       checked: "2026-11-24",
       status: "official",
     },
-    noWeightsNote: "usage windows, not token counts — no published allowance to price",
+    noWeightsNote: "a usage window is consumed · size not published as token counts",
     overage: "pause",
     tiers: {
       plus: { name: "Cursor Plus", priceUsd: 8, feedPlan: "Plus" },
@@ -181,7 +218,7 @@ export const PLAN_CATALOG = {
   },
   "anthropic-claude": {
     name: "Claude",
-    nameFrom: "tier",
+    nameFrom: "plan",
     capType: "usage-window",
     allowancePublished: false,
     source: {
@@ -189,7 +226,7 @@ export const PLAN_CATALOG = {
       checked: "2026-11-24",
       status: "official",
     },
-    noWeightsNote: "usage windows, not token counts — no published allowance to price",
+    noWeightsNote: "a usage window is consumed · size not published as token counts",
     overage: "pause",
     tiers: {
       pro: { name: "Claude Pro", priceUsd: 20, feedPlan: "Pro" },
@@ -270,7 +307,11 @@ export function resolveBilling(raw) {
   // re-resolving here would hand back a copy that never matches.
   if (typeof raw.unpriced === "boolean") return raw
   const catalog = typeof raw.vendor === "string" ? activeCatalog[raw.vendor] : null
-  const tier = catalog?.tiers?.[raw.tier]
+  // The schema is type (payg/subscription) → vendor → plan. `tier` is the
+  // legacy key for `plan`; both are read and resolve to the same catalog
+  // plan, so a config written either way prices identically.
+  const planKey = typeof raw.plan === "string" ? raw.plan : (typeof raw.tier === "string" ? raw.tier : null)
+  const tier = tiersOf(catalog)[planKey]
   const priceUsd = positive(raw.priceUsd) ?? positive(tier?.priceUsd)
   const allowanceCredits = positive(raw.allowanceCredits) ?? positive(tier?.allowanceCredits)
   // A token quota (Bolt: 10M tokens/month) reads from the record or its
@@ -296,14 +337,19 @@ export function resolveBilling(raw) {
   const catalogWeights = catalog?.weights ?? null
   const capType = typeof raw.capType === "string" ? raw.capType : (catalog?.capType ?? "prepaid-credits")
   const common = {
+    // type → vendor → plan: how the user pays, whose plan it is, which one.
+    type: "subscription",
     vendor: typeof raw.vendor === "string" ? raw.vendor : "custom",
-    tier: typeof raw.tier === "string" ? raw.tier : "custom",
+    plan: planKey ?? "custom",
+    // `tier` is the legacy name of `plan`, kept so configs and callers
+    // written against it keep matching.
+    tier: planKey ?? "custom",
     name:
       typeof raw.name === "string" && raw.name.length > 0
         ? raw.name
-        : catalog?.nameFrom === "tier" && tier?.name
+        : (catalog?.nameFrom === "plan" || catalog?.nameFrom === "tier") && tier?.name
           ? tier.name
-          : [catalog?.name, tier?.name ?? raw.tier].filter(Boolean).join(" "),
+          : [catalog?.name, tier?.name ?? planKey].filter(Boolean).join(" "),
     priceUsd,
     capType,
     models: Array.isArray(raw.models) ? raw.models.filter((id) => typeof id === "string") : null,
@@ -336,10 +382,13 @@ export function resolveBilling(raw) {
       allowanceUnit: null,
       discountFactor: null,
       unpriced: true,
+      // The note names what the vendor actually said, not a generic line.
+      // "no five-hour limit" is a different fact from "15-160 messages per
+      // 5h", and the reader should see which one applies to their plan.
       allowanceNote:
         typeof raw.allowanceNote === "string"
           ? raw.allowanceNote
-          : (catalog?.noWeightsNote ?? "allowance not published by the vendor"),
+          : (tier?.allowanceNote ?? catalog?.noWeightsNote ?? "not published by the vendor"),
       weights: null,
       catalogWeights: null,
       weightsNote: null,
@@ -363,7 +412,7 @@ export function resolveBilling(raw) {
       allowanceNote:
         typeof raw.allowanceNote === "string"
           ? raw.allowanceNote
-          : "usage window · priced against the model's own list price",
+          : (tier?.allowanceNote ?? "priced against the model's own list price"),
       weights: null,
       catalogWeights: null,
       weightsNote: null,
@@ -435,6 +484,15 @@ function normaliseWeights(raw) {
 }
 
 /**
+ * A vendor's plan table from the catalog — "a vendor has plans". `tiers` is
+ * the earlier name for the same table and is still read, so catalogs
+ * written before the rename keep working unchanged.
+ */
+export function tiersOf(entry) {
+  return entry?.tiers ?? entry?.plans ?? {}
+}
+
+/**
  * Normalise a billing config into a list of resolved records. Takes one
  * record — the original single-plan shape — or an array of them, so a config
  * written before multi-plan kept working unchanged. Records that cannot
@@ -482,16 +540,18 @@ export function planForModel(billing, modelID = "") {
  */
 export function withPlan(billing, record) {
   if (!record || typeof record !== "object") return billing
-  // "Pay per token" and "skip" are not plans. They replace whatever was
+  // "Pay as you go" and "skip" are not plans. They replace whatever was
   // recorded: saying you pay per token means no plan applies, and adding a
   // plan later supersedes that in turn (resolveBillings drops these markers).
-  if (record.payg === true || record.skipped === true) return record
+  // Payg is a billing *type* with no vendor and no plan; `payg: true` is its
+  // legacy marker and both spellings are accepted.
+  if (record.payg === true || record.type === "payg" || record.skipped === true) return record
   // Keep what is already recorded verbatim — it is the user's own config
   // shape. Only the new record is normalised, so nothing typed is replaced by
   // a derived equivalent.
   const plans = Array.isArray(billing)
     ? billing.filter(isPlainObject)
-    : isPlainObject(billing) && billing.payg !== true && billing.skipped !== true
+    : isPlainObject(billing) && billing.payg !== true && billing.type !== "payg" && billing.skipped !== true
       ? [billing]
       : []
   return [...plans, asConfig(record)]
@@ -505,7 +565,9 @@ export function withPlan(billing, record) {
 function asConfig(record) {
   const config = {}
   for (const key of [
+    "type",
     "vendor",
+    "plan",
     "tier",
     "name",
     "priceUsd",

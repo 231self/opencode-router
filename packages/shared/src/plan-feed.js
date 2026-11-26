@@ -125,14 +125,15 @@ export function applyPlanFacts(billing, facts) {
     },
   }
   // A record names its feed plan as `feedPlan` ("Plus") or as the catalog
-  // `tier` key ("plus"); the feed reports the display name. Match either,
+  // plan key ("plus"); the feed reports the display name. Match either,
   // case-insensitively, so a raw config entry and a resolved record both find
-  // their own row and no plan's price lands on another's record.
+  // their own row and no plan's price lands on another's record. `tier` is
+  // the legacy name of `plan` and is still read.
   const matches = (record, plan) => {
     const name = String(plan ?? "").toLowerCase()
     return (
       String(record?.feedPlan ?? "").toLowerCase() === name ||
-      String(record?.tier ?? "").toLowerCase() === name
+      String(record?.plan ?? record?.tier ?? "").toLowerCase() === name
     )
   }
   if (Array.isArray(billing)) {

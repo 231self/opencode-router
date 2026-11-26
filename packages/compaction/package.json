@@ -1,6 +1,6 @@
 {
   "name": "@231self/opencode-compaction",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Context compaction for OpenCode V2 and Kilo: the deterministic context optimiser, compaction ROI, and a structure-aware compaction advisory, with a WASM context core.",
   "type": "module",
   "license": "Apache-2.0",
@@ -38,6 +38,6 @@
     "wasm"
   ],
   "dependencies": {
-    "@231self/opencode-shared": "^0.2.0"
+    "@231self/opencode-shared": "^0.3.0"
   }
 }

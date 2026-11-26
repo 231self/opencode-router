@@ -190,6 +190,15 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0, planBurn 
               ? "Keep working. There is no safe checkpoint yet. This is a free tier: cost is not the constraint here, the context window is."
               : "Keep working. There is no safe checkpoint yet. Compaction economics were not computed: this model has no price data."
   const unpricedLine = pricing === "flat" ? "flat plan · $0 net" : "not computed · no price data"
+  // The price of one token, the same number the router weighs. The growth of
+  // the context is priced at it, so the report says what the bloat costs per
+  // turn — the holding cost in the compact-or-wait trade.
+  const unit = advisory.unitPrice
+  const growthTokens = Math.round(Number(advisory.signals?.growth) || 0)
+  const growthCost =
+    unit && growthTokens > 0
+      ? ` · ≈ ${dollars((growthTokens / 1e6) * unit.usdPerMTok)} per turn at unit price`
+      : ""
   const horizonRows =
     projections.length > 0
       ? projections.map((entry) => [
@@ -213,11 +222,11 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0, planBurn 
             ],
           ]
         : []),
-      ["growth", `${sign(Math.round(Number(advisory.signals?.growth) || 0))} tokens`],
+      ["growth", `${sign(growthTokens)} tokens${growthCost}`],
       // One block per recorded plan, each with its own burn. A single blended
       // figure would hide which allowance is the one running out. A plan with
-      // no published allowance shows its name and no burn rather than an
-      // invented number.
+      // no published allowance size shows its name and no burn rather than
+      // an invented number.
       ...planRows.flatMap((entry) => [
         ["plan", entry.label],
         ...(entry.burn
@@ -277,6 +286,14 @@ export function advisoryReport(pin, { noise = null, expectedTurns = 0, planBurn 
                     ["priced at", referenceLabel],
                   ]
                 : [["basis", "catalog prices"]]),
+            ...(unit
+              ? [
+                  [
+                    "unit price",
+                    `${dollars(unit.usdPerMTok)} per Mtok · ${unit.basis}`,
+                  ],
+                ]
+              : []),
             // The KV-cache invalidation is the cost of compacting, so it leads
             // when there is one. A flat plan's cash cost rounds to nothing —
             // the real cost there is the window it burns, not dollars — so the
@@ -467,8 +484,8 @@ async function openMenu(context, config) {
     prose(
       record.skipped
         ? "Plan setup skipped. /ctx plan runs it again; the question will not repeat on its own."
-        : record.payg
-          ? "Recorded: pay per token. /ctx plan adds a plan beside it."
+        : record.payg === true || record.type === "payg"
+          ? "Recorded: pay as you go — the billing type with no plan. /ctx plan adds a plan beside it."
           : `Added ${planLabel(record) ?? "custom plan"}. Now ${plans.length} plan${plans.length === 1 ? "" : "s"} on file; /ctx plan adds another.`,
     ),
   )
@@ -533,7 +550,7 @@ export async function runPlanRefresh(context, config, { fetchImpl } = {}) {
       "allowance",
       facts.allowancePublished
         ? "published by the vendor"
-        : "not published by the vendor · no shadow price",
+        : "size not published by the vendor · no shadow price",
     ])
     if (facts.limitsQuote) rows.push(["vendor limit", facts.limitsQuote])
   }

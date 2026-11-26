@@ -11,7 +11,7 @@
  *   confirm({ title, message })          -> boolean | undefined
  */
 
-import { getPlanCatalog, resolveBilling } from "./plan.js"
+import { getPlanCatalog, resolveBilling, tiersOf } from "./plan.js"
 
 /** Parse a human number: `82B`, `4.1b`, `16`, `1,000,000`. Null on junk. */
 export function parseAmount(raw) {
@@ -82,7 +82,7 @@ function formatCredits(value) {
 /** One row per catalog vendor, for the provider picker. */
 export function vendorOptions(catalog = getPlanCatalog()) {
   return Object.entries(catalog ?? {}).map(([value, entry]) => {
-    const tiers = Object.values(entry.tiers ?? {})
+    const tiers = Object.values(tiersOf(entry))
     const priced = tiers.filter((tier) => positive(tier.priceUsd) != null).length
     const allowance = tiers.filter(
       (tier) =>
@@ -103,10 +103,10 @@ export function vendorOptions(catalog = getPlanCatalog()) {
 }
 
 /** The tier rows for one catalog vendor. */
-export function tierOptions(vendor, catalog = getPlanCatalog()) {
+export function planOptions(vendor, catalog = getPlanCatalog()) {
   const entry = catalog?.[vendor]
   if (!entry) return []
-  return Object.entries(entry.tiers ?? {}).map(([value, tier]) => {
+  return Object.entries(tiersOf(entry)).map(([value, tier]) => {
     const price = positive(tier.priceUsd)
     const credits = positive(tier.allowanceCredits)
     const tokens = positive(tier.allowanceTokens)
@@ -136,33 +136,47 @@ export function tierOptions(vendor, catalog = getPlanCatalog()) {
  * is always there for a plan the catalog does not hold.
  */
 export async function runPlanWizard({ ask, modelLabel = "your model", catalog = getPlanCatalog() } = {}) {
-  const vendors = vendorOptions(catalog)
-  const kind = await ask.select({
+  // The schema is type → vendor → plan: first how the user pays, then whose
+  // plan it is, then which plan. "Pay as you go" is the type with no vendor
+  // and no plan — list prices stand and nothing is recorded as a plan.
+  const type = await ask.select({
     title: `Plan setup — how do you pay for ${modelLabel}?`,
     options: [
-      ...vendors,
-      { value: "other", title: "Other subscription", description: "A monthly price and allowance to record" },
-      { value: "payg", title: "Pay per token", description: "No plan — keep list prices" },
+      { value: "subscription", title: "Subscription", description: "A monthly plan from a vendor" },
+      { value: "payg", title: "Pay as you go", description: "No plan — keep list prices" },
       { value: "skip", title: "Skip", description: "Do not ask again" },
     ],
   })
-  if (kind === undefined) return null
-  if (kind === "payg") return { payg: true, source: { url: null, checked: null, status: "user" } }
-  if (kind === "skip") return { skipped: true, source: { url: null, checked: null, status: "user" } }
+  if (type === undefined) return null
+  if (type === "payg") {
+    return { type: "payg", payg: true, source: { url: null, checked: null, status: "user" } }
+  }
+  if (type === "skip") return { skipped: true, source: { url: null, checked: null, status: "user" } }
 
-  // A catalog vendor: pick its tier. The record is the vendor/tier pair, and
+  const vendors = vendorOptions(catalog)
+  const kind = await ask.select({
+    title: `Which vendor's plan covers ${modelLabel}?`,
+    options: [
+      ...vendors,
+      { value: "other", title: "Other subscription", description: "A monthly price and allowance to record" },
+    ],
+  })
+  if (kind === undefined) return null
+
+  // A catalog vendor: pick its plan. The record is the vendor/plan pair, and
   // every published number (price, allowance, weights, source) is filled from
   // the catalog at resolution — nothing is retyped here.
   if (catalog?.[kind]) {
-    const options = tierOptions(kind, catalog)
-    const tier = await ask.select({
+    const options = planOptions(kind, catalog)
+    const plan = await ask.select({
       title: `Which ${catalog[kind].name ?? kind} plan?`,
       options,
     })
-    if (tier === undefined) return null
+    if (plan === undefined) return null
     return summariseAndConfirm(ask, {
+      type: "subscription",
       vendor: kind,
-      tier,
+      plan,
       renewsDay: 1,
     })
   }
@@ -193,10 +207,11 @@ export async function runPlanWizard({ ask, modelLabel = "your model", catalog = 
   // invented for it.
   if (allowanceAmount == null) {
     return summariseAndConfirm(ask, {
+      type: "subscription",
       name,
       priceUsd,
       capType: "usage-window",
-      allowanceNote: "allowance not published by the vendor — recorded from your answers",
+      allowanceNote: "not published by the vendor — recorded from your answers",
     })
   }
 
@@ -215,6 +230,7 @@ export async function runPlanWizard({ ask, modelLabel = "your model", catalog = 
   if (renewsDay === undefined) return null
 
   return summariseAndConfirm(ask, {
+    type: "subscription",
     name,
     priceUsd,
     [unit === "tokens" ? "allowanceTokens" : "allowanceCredits"]: allowanceAmount,
@@ -228,15 +244,18 @@ async function summariseAndConfirm(ask, draft) {
   if (!record) return null
   // Each allowance type reads as what the vendor actually published. A
   // window is a message budget, a dollar plan is a budget of API credits, a
-  // quota is a count. None is described as a number it is not.
+  // quota is a count. None is described as a number it is not, and an
+  // unpriced plan names the allowance it consumes — "a weekly Work/Codex
+  // allowance is consumed" — rather than implying nothing is consumed.
   const allowance = record.unpriced
-    ? `Allowance: not published · ${record.allowanceNote}`
+    ? `Allowance: ${record.allowanceNote}`
     : record.allowanceUnit === "window"
-      ? `Allowance: usage window · ${record.window?.messagesPerWindow} messages per ${record.window?.windowHours}h (vendor estimate)`
+      ? `Allowance: usage window · ${record.window?.messagesPerWindow} messages per ${record.window?.windowHours}h (vendor estimate) · ${record.allowanceNote}`
       : record.allowanceUnit === "usd"
         ? `Allowance: $${record.priceUsd}/mo buys $${record.allowanceUsd} of API usage`
         : `Allowance: ${formatCredits(record.allowanceCredits)} ${record.allowanceUnit}/mo`
   const lines = [
+    `Type: ${record.type === "payg" ? "pay as you go" : "subscription"}`,
     `Plan: ${record.name}`,
     `Price: $${record.priceUsd}/mo`,
     allowance,

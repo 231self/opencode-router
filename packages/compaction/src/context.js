@@ -1,4 +1,4 @@
-import { readPin, sessionHash, writePin } from "@231self/opencode-shared/state.js"
+import { readPin, readTurns, sessionHash, writePin } from "@231self/opencode-shared/state.js"
 import { referencePrice } from "@231self/opencode-shared/cost.js"
 import { loadPricing, priceForModel } from "@231self/opencode-shared/price-table.js"
 import { sameModel, refOf } from "@231self/opencode-shared/refs.js"
@@ -315,6 +315,7 @@ export async function runContext({ host, env, ctx, config, core, event, judge = 
           cache,
           calibration,
           noise: readCompactionNoise(env),
+          turns: readTurns(host, 1000, env),
         })
         compactionState = { ...guard, advisory }
       } catch {

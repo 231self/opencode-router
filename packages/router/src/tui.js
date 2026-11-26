@@ -250,9 +250,14 @@ function poolLines(config, models, providers) {
     const cost = free
       ? "free (local)"
       : `${formatCost(model.cost)}${model.costSource === "modelsdev" ? " (models.dev)" : ""}`
+    // The unit price is what 1M tokens of a typical turn cost on this model
+    // for this user, and its basis says whether the mix is measured or the
+    // published stand-in.
+    const unit =
+      !free && model.unitPrice ? ` · unit ${money(model.unitPrice.usdPerMTok)}/M · ${model.unitPrice.basis}` : ""
     return [
       `${model.providerID}/${model.modelID}${model.variant && model.variant !== "default" ? `#${model.variant}` : ""}`,
-      `ctx ${model.limit.context} · cost ${cost} · quality ${quality} · local ${model.local ? "yes" : "no"}`,
+      `ctx ${model.limit.context} · cost ${cost}${unit} · quality ${quality} · local ${model.local ? "yes" : "no"}`,
     ]
   })
   const blocks = [
@@ -912,8 +917,8 @@ async function runCommand(context, input) {
         prose(
           record.skipped
             ? "Plan setup skipped. /router plan runs it again."
-            : record.payg
-              ? "Recorded: pay per token. The pool keeps list prices."
+            : record.payg === true || record.type === "payg"
+              ? "Recorded: pay as you go — no plan, the pool keeps list prices."
               : `Added ${planLabel(record) ?? "custom plan"}. Now ${plans.length} plan${plans.length === 1 ? "" : "s"} on file; the pool prices covered models at their rates.`,
         ),
       )

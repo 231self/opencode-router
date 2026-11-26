@@ -28,6 +28,7 @@ export function compactionSidebarBlock({
   plan = null,
   burn = null,
   expiry = null,
+  unitPrice = null,
 } = {}) {
   const items = []
   const headline = verdictLine(verdict)
@@ -37,6 +38,13 @@ export function compactionSidebarBlock({
     items.push(`ctx ${short(capacity.size)}/${short(capacity.limit)} · ${free}% free`)
   } else if (capacity?.size) {
     items.push(`ctx ${short(capacity.size)}`)
+  }
+  // The price of one token on this model — the same number the router weighs
+  // — with its mix basis: measured from turns, or the published stand-in.
+  if (unitPrice && Number(unitPrice.usdPerMTok) > 0) {
+    items.push(
+      `unit $${Number(unitPrice.usdPerMTok).toPrecision(2)}/M · ${unitPrice.measured ? "measured mix" : "stand-in mix"}`,
+    )
   }
   // One plan: the single-line form. Several: one burn line each.
   const entries = Array.isArray(plans) && plans.length > 0 ? plans : (plan ? [{ label: plan, burn }] : [])
@@ -133,6 +141,7 @@ export function registerCompactionSidebar(context, options = {}) {
         capacity: advisory?.capacity ?? null,
         plans,
         expiry: planEstimates?.expiry ?? null,
+        unitPrice: advisory?.unitPrice ?? null,
       })
     },
   })

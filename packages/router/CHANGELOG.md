@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0 — 2026-11-26
+
+### Added
+
+- Unit price per pool model: what 1M tokens of a typical turn cost the user
+  on that model, blended from the resolved rate card (plan rates first) and
+  the measured r/w/cache/input mix of the user's own turns. `/router pool`
+  shows it per model with its basis — `unit $0.13/M · measured mix · 213
+  turns`, or `reference mix · stand-in` for a model never used (the
+  published 7 : 2 : 1 cache : input : output blend, cited in code).
+- `/router plan` records the plan from the router side in the billing
+  schema's order: payg or subscription, then vendor, then the vendor's
+  plan.
+
+### Changed
+
+- The cost projection weighs measurements instead of assumptions. The
+  cache-read share falls back to the measured share of the turn log (was a
+  fixed 0.8) and the expected output size to the measured output per turn
+  (was 1200). Measured, not assumed — the incumbent's own measured share
+  still applies first, and `pin.cacheHitRatio: 0` still turns the discount
+  off.
+- Payg is recorded as a billing type (`type: "payg"`); `payg: true` still
+  reads as its marker.
+
 ## 0.4.0 — 2026-11-24
 
 ### Added

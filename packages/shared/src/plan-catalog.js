@@ -3,8 +3,9 @@
  *
  * `PLAN_CATALOG` in `plan.js` is the built-in set of published plans. This
  * module layers a user file over it: `~/.config/omlx-router/plans.json` may
- * add vendors, add tiers, or override any number in the built-in set. The
- * shape of a vendor entry is the same as `PLAN_CATALOG`'s, so moving this
+ * add vendors, add plans, or override any number in the built-in set. The
+ * shape of a vendor entry is the same as `PLAN_CATALOG`'s — a vendor has
+ * `plans` (`tiers` is the earlier name for the same table) — so moving this
  * catalog to a shared public file later is a copy, not a rewrite.
  *
  * Honesty rules are unchanged and enforced at resolution, not here: a fact
@@ -19,7 +20,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { PLAN_CATALOG, setPlanCatalog } from "./plan.js"
+import { PLAN_CATALOG, setPlanCatalog, tiersOf } from "./plan.js"
 
 /** Where the user's plan catalog lives. Overridable so tests can isolate it. */
 export function planCatalogPath(env = process.env) {
@@ -35,7 +36,7 @@ export function planCatalogPath(env = process.env) {
 export function mergePlanCatalog(user, base = PLAN_CATALOG) {
   const merged = {}
   for (const [vendor, entry] of Object.entries(base ?? {})) {
-    merged[vendor] = { ...entry, tiers: { ...(entry.tiers ?? {}) } }
+    merged[vendor] = { ...entry, tiers: { ...tiersOf(entry) } }
   }
   if (!user || typeof user !== "object" || Array.isArray(user)) return merged
   for (const [vendor, entry] of Object.entries(user)) {
@@ -44,7 +45,7 @@ export function mergePlanCatalog(user, base = PLAN_CATALOG) {
     merged[vendor] = {
       ...prior,
       ...entry,
-      tiers: { ...(prior.tiers ?? {}), ...(entry.tiers ?? {}) },
+      tiers: { ...tiersOf(prior), ...tiersOf(entry) },
     }
   }
   return merged

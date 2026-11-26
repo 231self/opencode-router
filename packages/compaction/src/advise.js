@@ -1,6 +1,7 @@
 import { compactionRoi, modelledTurnCost, tierAt } from "@231self/opencode-shared/cost.js"
 import { cacheExpiryCredits, creditCost, creditTier, planForModel, planLabel, weightsFor } from "@231self/opencode-shared/plan.js"
 import { priceSourceLabel, resolveCost } from "@231self/opencode-shared/cost-resolution.js"
+import { unitPrice } from "@231self/opencode-shared/unit-price.js"
 import { contextMessageTokens, promptPartTokens } from "@231self/opencode-shared/tokens.js"
 
 import { composeAdvisory, guardAllows, normaliseHorizons, projectHorizons } from "./advisory.js"
@@ -40,6 +41,7 @@ export async function advise({
   cache = null,
   calibration = null,
   noise = null,
+  turns = null,
 }) {
   const settings = config?.compaction ?? {}
   const structural = scoreSignals(extractSignals({ messages, measuredTokens, previousTokens }), settings)
@@ -74,6 +76,11 @@ export async function advise({
   const pricedHere = resolved.pricedHere
   const planName = resolved.planName
   const priceSource = priceSourceLabel(resolved, model)
+  // The unit price: what 1M tokens of a typical turn cost on this model for
+  // this user — the same number the router weighs, from the same resolved
+  // rates and the same measured mix. The verdict's dollar terms price each
+  // billed bucket exactly; this is the one-number price of a token.
+  const unit = unitPrice({ resolved, turns, modelID })
   // Whether the money below was actually computed, and at whose prices.
   const moneyComputed = resolved.computed
   // Non-empty when the money is a projection at a sibling's list price rather
@@ -231,6 +238,7 @@ export async function advise({
     pricing,
     priceSource,
     moneyBasis,
+    unitPrice: unit,
     capacity,
     cache: cache ?? { ratio, samples: 0, source: "fallback" },
     projections: projectHorizons(roi, horizons),

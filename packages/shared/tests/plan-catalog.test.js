@@ -84,3 +84,20 @@ test("the catalog path is overridable for tests and reads from the config dir", 
   expect(planCatalogPath({})).toContain(path.join(".config", "omlx-router", "plans.json"))
   expect(planCatalogPath({ OMLX_ROUTER_PLANS: "/tmp/x.json" })).toBe("/tmp/x.json")
 })
+
+test("a vendor's plans merge under the schema name as under the legacy tiers", () => {
+  // "A vendor has plans": `plans` is the schema key in a user's plans.json;
+  // `tiers` is the earlier name for the same table and both merge alike.
+  const merged = mergePlanCatalog({
+    "xiaomi-mimo": { plans: { ultra: { name: "Ultra", priceUsd: 200, allowanceCredits: 200e9 } } },
+  })
+  expect(merged["xiaomi-mimo"].tiers.ultra.priceUsd).toBe(200)
+  expect(merged["xiaomi-mimo"].tiers.max.priceUsd).toBe(100)
+  // The merged plan resolves exactly like a built-in one.
+  setPlanCatalog(merged)
+  try {
+    expect(resolveBilling({ vendor: "xiaomi-mimo", plan: "ultra" }).allowanceCredits).toBe(200e9)
+  } finally {
+    restore()
+  }
+})

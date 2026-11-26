@@ -18,6 +18,7 @@ import {
   projectBurn,
   resolveBilling,
   resolveBillings,
+  tiersOf,
   withPlan,
   weightsFor,
 } from "../src/plan.js"
@@ -415,4 +416,34 @@ test("measureWindow reports the measured evidence, not a bare number", () => {
   expect(patch.allowanceUsd).toBeCloseTo(2764.8, 3)
   // No turns to measure the message size from: no value, not a guess.
   expect(measureWindow({ vendor: "openai-codex", tier: "plus" }, { refPrice: 2 })).toBeNull()
+})
+
+test("billing is type → vendor → plan; tier is the legacy name of plan", () => {
+  // The schema: a billing *type* (payg or subscription), a vendor, and one
+  // of the vendor's plans. `tier` is accepted as the older key for `plan`
+  // and resolves to exactly the same numbers.
+  const byPlan = resolveBilling({ vendor: "xiaomi-mimo", plan: "max", renewsDay: 1 })
+  const byTier = resolveBilling({ vendor: "xiaomi-mimo", tier: "max", renewsDay: 1 })
+  expect(byPlan.type).toBe("subscription")
+  expect(byPlan.vendor).toBe("xiaomi-mimo")
+  expect(byPlan.plan).toBe("max")
+  expect(byPlan.tier).toBe("max")
+  expect(byPlan.allowanceCredits).toBe(byTier.allowanceCredits)
+})
+
+test("pay as you go is a billing type with no vendor and no plan", () => {
+  // The marker names the type; it is not a plan and prices nothing.
+  expect(resolveBillings({ type: "payg" })).toEqual([])
+  expect(resolveBilling({ type: "payg" })).toBeNull()
+  // It replaces recorded plans, and a plan named later supersedes it again.
+  expect(withPlan([{ vendor: "xiaomi-mimo", plan: "max" }], { type: "payg" })).toEqual({ type: "payg" })
+  expect(resolveBillings(withPlan({ type: "payg" }, { vendor: "xiaomi-mimo", plan: "max" }))).toHaveLength(1)
+})
+
+test("a vendor's plan table is readable as plans or as the legacy tiers", () => {
+  // "A vendor has plans": `plans` is the schema name, `tiers` still works.
+  expect(tiersOf({ plans: { plus: { priceUsd: 1 } } }).plus.priceUsd).toBe(1)
+  expect(tiersOf({ tiers: { max: { priceUsd: 2 } } }).max.priceUsd).toBe(2)
+  // The built-in catalog resolves through the same reader.
+  expect(resolveBilling({ vendor: "xiaomi-mimo", plan: "max" }).priceUsd).toBe(100)
 })

@@ -473,3 +473,36 @@ test("on a plan the credit figures veto, not the near-zero dollars", () => {
   const noPlan = composeAdvisory({ structural, roi: dollars, planRoi: null, moneyBasis: "" })
   expect(noPlan.verdict).toBe("compact-now")
 })
+
+test("the advisory carries the unit price, measured from the turn log", async () => {
+  const turns = [
+    { usedModel: "deepseek/deepseek-v4-pro", tokens: { input: 100, output: 50, cache: { read: 700, write: 150 } } },
+  ]
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, summaryTokens: 1200 }, pin: { cacheHitRatio: 0.8 } },
+    model: PRICED_MODEL,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+    turns,
+  })
+  expect(advisory.unitPrice.measured).toBe(true)
+  expect(advisory.unitPrice.basis).toContain("1 turn")
+  // The measured mix weighs each bucket at the model's own rates:
+  // (700×0.1 + 100×1 + 150×1.25 + 50×2) / 1000 = 0.4575 $/Mtok
+  expect(advisory.unitPrice.usdPerMTok).toBeCloseTo(0.4575, 6)
+})
+
+test("no turns means the stand-in mix, labelled and never a veto", async () => {
+  const { advisory } = await advise({
+    config: { compaction: { expectedTurns: 8, summaryTokens: 1200 }, pin: { cacheHitRatio: 0.8 } },
+    model: PRICED_MODEL,
+    messages: BOUNDARY,
+    measuredTokens: 100_000,
+    previousTokens: 60_000,
+  })
+  expect(advisory.unitPrice.measured).toBe(false)
+  expect(advisory.unitPrice.basis).toContain("reference mix")
+  expect(advisory.unitPrice.basis).toContain("stand-in")
+  expect(advisory.unitPrice.projection).toBe(true)
+})
